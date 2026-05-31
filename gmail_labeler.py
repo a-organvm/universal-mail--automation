@@ -24,6 +24,7 @@ from core.rules import (
     LABEL_RULES,
     PRIORITY_LABELS,
     KEEP_IN_INBOX,
+    is_protected_sender,
     categorize_message as _core_categorize,
 )
 from core.state import StateManager
@@ -195,7 +196,10 @@ class GmailLabeler:
             
             headers = data.get('payload', {}).get('headers', [])
             label_name = self.categorize_message(headers)
-            
+            from_hdr = next(
+                (h.get("value", "") for h in headers if h.get("name", "").lower() == "from"), ""
+            )
+
             # Update stats
             self.stats[label_name] += 1
             
@@ -226,9 +230,10 @@ class GmailLabeler:
             if remove_source_id and label_name != self.remove_source_label:
                 remove_list.append(remove_source_id)
 
-            # Logic: ARCHIVE (Remove INBOX) if not in retention list
-            # We assume 'INBOX' is the ID for the Inbox label (standard Gmail behavior)
-            if label_name not in KEEP_IN_INBOX:
+            # Logic: ARCHIVE (Remove INBOX) if not in retention list AND the sender
+            # is not protected (fail-closed never-archive gate — a blank/unparseable
+            # From is treated as protected and kept in inbox).
+            if label_name not in KEEP_IN_INBOX and not is_protected_sender(from_hdr):
                 remove_list.append('INBOX')
             
             add_ids = tuple(add_list)

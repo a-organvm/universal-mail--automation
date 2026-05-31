@@ -68,6 +68,10 @@ class LabelAction:
 
     Attributes:
         message_id: The message to act upon
+        sender: The 'From' header value — REQUIRED for the protected-sender gate.
+            Carried so the provider chokepoint can re-check is_protected_sender
+            before any archive/move; if blank, the fail-closed gate treats it as
+            protected (never archived). Populate it at every action-building site.
         add_labels: Labels to add to the message
         remove_labels: Labels to remove from the message
         archive: Whether to remove from inbox (archive)
@@ -78,6 +82,7 @@ class LabelAction:
         due_date: Due date for flagged items (Outlook To Do integration)
     """
     message_id: str
+    sender: str = ""
     add_labels: List[str] = field(default_factory=list)
     remove_labels: List[str] = field(default_factory=list)
     archive: bool = False
@@ -91,6 +96,7 @@ class LabelAction:
         """Merge another action into this one (same message_id assumed)."""
         return LabelAction(
             message_id=self.message_id,
+            sender=self.sender or other.sender,
             add_labels=list(set(self.add_labels + other.add_labels)),
             remove_labels=list(set(self.remove_labels + other.remove_labels)),
             archive=self.archive or other.archive,

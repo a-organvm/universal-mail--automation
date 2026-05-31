@@ -1,8 +1,12 @@
 """
 Lightweight IMAP rules engine to apply Gmail-style labels/folders using shared LABEL_RULES.
 
+LEGACY/STANDALONE — relabel/COPY only; does NOT remove INBOX and does NOT enforce
+the protected-sender gate (core.rules.is_protected_sender). Do NOT extend it to
+archive (remove INBOX / move out of inbox) without adopting that gate first.
+
 Usage:
-  DRY_RUN=1 IMAP_HOST=imap.gmail.com IMAP_USER="youremail@gmail.com" IMAP_PASS="app-password" python imap_rules.py --limit 200
+  DRY_RUN=1 IMAP_HOST=imap.gmail.com IMAP_USER="you@example.com" IMAP_PASS="app-password" python imap_rules.py --limit 200
   # Remove DRY_RUN to apply actions.
 
 Notes:

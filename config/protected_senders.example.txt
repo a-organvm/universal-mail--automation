@@ -1,0 +1,25 @@
+# EXAMPLE protected-sender list (this file IS committed; it is a template).
+#
+# Copy it to `protected_senders.local.txt` (gitignored) and replace the
+# placeholders with YOUR real domains. core.rules loads the local file at import
+# (or $PROTECTED_SENDERS_FILE) and MERGES it with the generic defaults shipped in
+# code. Your real list — a map of your lawyer, banks, government accounts,
+# employers, and self — must NEVER be committed to a public repo.
+#
+# Format: one domain per line; '#' comments and blank lines ignored.
+#   self: <localpart-or-address>   registers your own mailbox (dots stripped).
+# Matching is domain/subdomain-boundary (entry OR *.entry). Any *.gov terminal
+# label is auto-protected without listing it.
+
+# --- Legal ---
+example-lawfirm.com
+
+# --- Financial: account/alerts ONLY (NOT a sibling marketing domain) ---
+example-bank.com
+alerts.example-bank.com
+
+# --- Organizations you have a relationship with ---
+example-nonprofit.org
+
+# --- Your own mailbox ---
+self: youremail

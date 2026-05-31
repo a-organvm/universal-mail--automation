@@ -2,7 +2,11 @@
 
 from datetime import datetime, timezone, timedelta
 
+import pytest
+
 from core.rules import (
+    is_protected_sender,
+    normalize_sender,
     LABEL_RULES,
     PRIORITY_LABELS,
     KEEP_IN_INBOX,
@@ -320,3 +324,85 @@ class TestCalculateEmailAgeHours:
         naive = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(tzinfo=None)
         age = calculate_email_age_hours(naive)
         assert 0.5 < age < 1.5
+
+
+# Adversarial protected-gate vectors (from the 2026-05-31 hardening workflow).
+# Each case asserts the FAIL-CLOSED never-archive gate parses + decodes the real
+# sender before matching. Fail-open vectors (relay/encoded/punycode/self/multi-
+# address) must be protected; fail-closed-wrong vectors (substring embeds,
+# display-name/local-part spoofs, foreign/embedded .gov) must NOT be protected.
+#
+# SYNTHETIC FIXTURES ONLY — these exercise GENERIC properties (relay decode,
+# RFC2047, punycode, boundary matching, gov terminal-label, gmail canonicalization).
+# example-lawfirm.com / example-bank.com / example-nonprofit.org are shipped in
+# EXAMPLE_PROTECTED_SENDERS; example-bank-marketing.com is deliberately NOT. No
+# real contact of any user appears here (the real list lives in a gitignored file).
+PROTECTED_GATE_CASES = [
+    # (from_string, expected_protected, reason)
+    # --- CONTRACT ---
+    ("Lawyer <a@example-lawfirm.com>", True, "legal exact domain"),
+    ("DocuSign <dse@docusign.net>", True, "e-sign generic domain"),
+    ("SSA <noreply@ssa.gov>", True, ".gov terminal label"),
+    ("Bank Alerts <alerts@alerts.example-bank.com>", True, "bank-alert subdomain in list"),
+    ("Bank News <news@example-bank-marketing.com>", False, "marketing sibling, not in list"),
+    ("Someone <someone.else@gmail.com>", False, "random gmail, not self"),
+    ("Promo <promo@some-marketing.example>", False, "marketing, not protected"),
+    # --- FAIL-OPEN fixes (CRITICAL/HIGH) ---
+    ("Lawyer <example-lawfirm_com_8f3a2b@icloud.com>", True, "relay dots->underscores"),
+    ("Bank <example-bank_com_77@icloud.com>", True, "relay short numeric token"),
+    ("Lawyer <user_at_example-lawfirm_com_a1b2c3@icloud.com>", True, "relay _at_ form"),
+    ("Bank <user_at_example-bank_com_x9z@privaterelay.appleid.com>", True, "privaterelay _at_ form"),
+    ("Lawyer <example-lawfirm_com_tok_tok@icloud.com>", True, "MF-6 multi-segment relay token"),
+    ("Apple <noreply@e.appleid.com>", True, "appleid.com subdomain"),
+    ("Apple <id@privaterelay.appleid.com>", True, "privaterelay is appleid subdomain"),
+    ("Gov <irs_gov_tok9f@icloud.com>", True, "relay-encoded .gov"),
+    ("Me <youremail@gmail.com>", True, "self, gmail canonical"),
+    ("Me <y.o.u.r.e.m.a.i.l@gmail.com>", True, "self, gmail dotted"),
+    ("Me <youremail+invoices@gmail.com>", True, "self, plus-tag"),
+    ("Me <youremail@googlemail.com>", True, "self via googlemail.com"),
+    ("=?utf-8?B?TGVnYWw=?= <a@example-lawfirm.com>", True, "RFC2047 display, real domain protected"),
+    ("Lawyer <a@x.y.example-lawfirm.com>", True, "deep subdomain of protected base"),
+    # --- MF-5 multi-address From (union; protected in either position) ---
+    ("Lawyer <a@example-lawfirm.com>, Assistant <b@evil-bulk.io>", True, "MF-5 protected FIRST"),
+    ("Assistant <b@evil-bulk.io>, Lawyer <a@example-lawfirm.com>", True, "MF-5 protected SECOND"),
+    ("Team: a@example-lawfirm.com;", True, "RFC5322 group syntax"),
+    ("a@b@example-lawfirm.com", True, "multiple @, last-@ domain protected, fail-closed-safe"),
+    ("Apple <noreply@xn--80ak6aa92e.com>", False, "punycode homoglyph != apple.com (not auto-trusted)"),
+    # --- FAIL-CLOSED-WRONG fixes (MED/HIGH) ---
+    ('"example-bank.com Security Alert" <statements@attacker-phish.example>', False, "display-name spoof"),
+    ("Sales <x@pineapple.com>", False, "substring embed of generic apple.com"),
+    ("News <x@notgoogle.com>", False, "substring embed of generic google.com"),
+    ("Legal <a@example-lawfirm.com.attacker.example>", False, "subdomain left-label spoof"),
+    ("X <a@notexample-lawfirm.com>", False, "left-substring of protected base"),
+    ("Gov <noreply@irs.gov.attacker.com>", False, "gov embedded non-terminal"),
+    ("UK <x@service.gov.uk>", False, "foreign gov, US-only rule"),
+    ("Spoof <spoof.gov@evil.io>", False, "gov in local part only"),
+    ('"example-bank.com"@attacker.example', False, "quoted local-part token"),
+    # --- NORMALIZATION ---
+    ("IRS <noreply@irs.gov.>", True, "trailing FQDN dot stripped"),
+    ("NOREPLY@IRS.GOV", True, "uppercase, bare addr"),
+    ("=?utf-8?Q?example-bank=2Ecom?= <billing@attacker.example>", False, "QP-encoded brand in display only"),
+    # --- FAIL CLOSED on uncertainty ---
+    ("", True, "empty -> fail closed"),
+    (None, True, "None -> fail closed"),
+    ("garbage no at sign", True, "unparseable -> fail closed"),
+    # --- relay NON-protected senders decode but are NOT protected ---
+    ("Cinema <gables_com_z1q@icloud.com>", False, "relay sender, decoded domain not in list"),
+    ("Friend <friend_at_protonmail_com_aa11@icloud.com>", False, "relay protonmail friend"),
+]
+
+
+class TestProtectedSenderGate:
+    @pytest.mark.parametrize("frm,expected,reason", PROTECTED_GATE_CASES)
+    def test_gate(self, frm, expected, reason):
+        assert is_protected_sender(frm) is expected, reason
+
+    def test_normalize_recovers_relay_domain(self):
+        assert normalize_sender("X <example-lawfirm_com_8f3a2b@icloud.com>")[2] == "example-lawfirm.com"
+
+    def test_normalize_idna(self):
+        d = normalize_sender("X <a@xn--80ak6aa92e.com>")[2]
+        assert not d.startswith("xn--")  # decoded to U-label
+
+    def test_display_name_never_protects(self):
+        assert is_protected_sender('"alerts@example-bank.com" <attacker@evil.io>') is False

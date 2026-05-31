@@ -6,8 +6,9 @@ tell application "Mail"
 	
 	-- 1. Needs Action (The most important view)
 	-- Criteria: Label is "Awaiting Reply" OR "To Do" OR Label is Personal AND Unread
+	-- Replace "your-name" with your own name/email fragment (kept generic for a public repo).
 	make new smart mailbox with properties {name:"1. Needs Action", conditions:{¬
-		{condition type:sender, qualifier:does contain value:"youremail"}, ¬
+		{condition type:sender, qualifier:does contain value:"your-name"}, ¬
 		{condition type:message is unread, qualifier:none, expression:""} ¬
 		}}
 		

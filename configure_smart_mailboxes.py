@@ -8,6 +8,7 @@ Run:
     source .venv/bin/activate && python configure_smart_mailboxes.py
 """
 
+import os
 import plistlib
 import shutil
 import uuid
@@ -15,6 +16,11 @@ from pathlib import Path
 
 PLIST_PATH = Path("~/Library/Mail/V10/MailData/SyncedSmartMailboxes.plist").expanduser()
 BACKUP_PATH = PLIST_PATH.with_suffix(".backup")
+
+# Substring used to match YOUR own sent/CC mail in the PERSONAL smart mailbox.
+# Set SELF_NAME to your name or email fragment; defaults to a placeholder so no
+# PII is committed to this public repo.
+SELF_NAME = os.environ.get("SELF_NAME", "your-name")
 
 # Smart mailbox definitions keyed by MailboxName.
 SMART_DEFS = {
@@ -28,9 +34,9 @@ SMART_DEFS = {
         {"Header": "Mailbox", "Qualifier": "ContainsString", "Expression": "Awaiting Reply"},
         {"Header": "Mailbox", "Qualifier": "ContainsString", "Expression": "Personal"},
     ],
-    # Personal mail by address.
+    # Personal mail by address (your own name/email fragment, from $SELF_NAME).
     "PERSONAL": [
-        {"Header": "From", "Qualifier": "ContainsString", "Expression": "youremail"},
+        {"Header": "From", "Qualifier": "ContainsString", "Expression": SELF_NAME},
     ],
     # Finance buckets.
     "RECEIPTS & BILLS": [

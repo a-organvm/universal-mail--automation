@@ -7,6 +7,11 @@ Logic:
 3. Determine best category for each domain based on subject keywords.
 4. Bulk move ALL emails from that domain.
 5. Repeat.
+
+LEGACY/STANDALONE — moves between category labels (out of Misc/Other), NOT out of
+INBOX, and does NOT enforce the protected-sender gate (core.rules.is_protected_
+sender). Misroute risk only, not a never-archive breach. Do NOT extend it to
+remove INBOX without adopting that gate first.
 """
 
 import re

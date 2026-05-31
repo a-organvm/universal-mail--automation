@@ -8,6 +8,7 @@ import os
 import subprocess
 from typing import Optional, Tuple
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -162,9 +163,15 @@ def get_credentials(scopes: Optional[list] = None) -> Credentials:
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            store_token_info(creds)
-        else:
+            try:
+                creds.refresh(Request())
+                store_token_info(creds)
+            except RefreshError:
+                # Dead/revoked/expired refresh token (e.g. Testing-mode 7-day
+                # expiry -> invalid_grant). Fall through to interactive consent
+                # instead of crashing with an opaque RefreshError traceback.
+                creds = None
+        if not creds or not creds.valid:
             client_config = load_client_config()
             flow = InstalledAppFlow.from_client_config(client_config, scopes)
             creds = flow.run_local_server(port=0)

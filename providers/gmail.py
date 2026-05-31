@@ -7,7 +7,7 @@ interface for consistent behavior with other providers.
 
 import logging
 import time
-from typing import Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any, TYPE_CHECKING
 
 from googleapiclient.errors import HttpError
 
@@ -17,6 +17,9 @@ from providers.base import (
     ListMessagesResult,
 )
 from core.models import EmailMessage, LabelAction, ProcessingResult
+
+if TYPE_CHECKING:  # AuditLog is duck-typed at runtime; no import-time coupling
+    from core.audit import AuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -369,15 +372,36 @@ class GmailProvider(EmailProvider):
             logger.error(f"Failed to create label {label}: {e}")
             raise
 
-    def apply_actions(self, actions: List[LabelAction]) -> ProcessingResult:
-        """Apply actions using batch modify for efficiency."""
+    def apply_actions(
+        self,
+        actions: List[LabelAction],
+        audit: Optional["AuditLog"] = None,
+    ) -> ProcessingResult:
+        """Apply actions using batch modify for efficiency.
+
+        ``audit`` (optional): records each message's post-gate disposition as a
+        trust receipt — see core/audit.py. Gmail labels are additive (not moves),
+        so a protected message that gets categorized is recorded protected_held.
+        """
         result = ProcessingResult()
 
         # Group actions by (add_labels, remove_labels) for batch processing
         from collections import defaultdict
         batches: Dict[tuple, List[str]] = defaultdict(list)
+        # Per-message recording intent, resolved to an ACTUAL disposition only
+        # after its batch executes (so a failed batchModify never over-reports a
+        # message as archived). See core/audit.py.
+        pending: Dict[str, dict] = {}
 
         for action in actions:
+            # PROTECTED-SENDER GATE (Gmail overrides apply_actions, so it does NOT
+            # inherit base.apply_actions' gate — enforce the same chokepoint here).
+            # _drop_if_protected clears archive + strips INBOX from remove_labels in
+            # place, so the INBOX-removal below becomes a no-op for protected mail.
+            # Label ADDS are kept: on Gmail a label is additive, not an out-of-inbox
+            # move, so protected mail stays in the inbox AND gets categorized.
+            protected = self._drop_if_protected(action)
+
             # Ensure labels exist
             add_ids = []
             for label in action.add_labels:
@@ -396,6 +420,24 @@ class GmailProvider(EmailProvider):
                 star_id = self._label_cache.get("STARRED", "STARRED")
                 add_ids.append(star_id)
 
+            if audit is not None:
+                # "Left inbox" for Gmail == the INBOX label is in the removeLabelIds
+                # the API will actually receive (post-gate). Resolve the INBOX id
+                # through the label cache — Gmail's system INBOX id IS the literal
+                # "INBOX", but never let a non-literal/aliased id hide a real
+                # departure — and match case-insensitively on both "INBOX"/"\\INBOX"
+                # forms, mirroring the base-provider path (base.py). Resolved to
+                # archived=True only if the batch SUCCEEDS, below — no over-count on
+                # API failure. Broadening only: can add violations, never hide one.
+                inbox_id = str(self._label_cache.get("INBOX", "INBOX")).upper()
+                _inbox_forms = {"INBOX", "\\INBOX", inbox_id}
+                pending[action.message_id] = {
+                    "sender": action.sender,
+                    "protected": protected,
+                    "add_labels": list(action.add_labels),
+                    "left_inbox": any(str(rid).upper() in _inbox_forms for rid in remove_ids),
+                }
+
             key = (tuple(sorted(add_ids)), tuple(sorted(remove_ids)))
             batches[key].append(action.message_id)
 
@@ -403,7 +445,8 @@ class GmailProvider(EmailProvider):
             for label in action.add_labels:
                 result.add_label_stat(label)
 
-        # Execute batch modifications
+        # Execute batch modifications, tracking which message IDs actually applied.
+        succeeded: set = set()
         for (add_ids, remove_ids), msg_ids in batches.items():
             # Chunk by batch modify limit
             for i in range(0, len(msg_ids), BATCH_MODIFY_SIZE):
@@ -422,6 +465,7 @@ class GmailProvider(EmailProvider):
                         "batch modify"
                     )
                     result.success_count += len(chunk)
+                    succeeded.update(chunk)
                 except HttpError as e:
                     logger.error(f"Batch modify failed: {e}")
                     result.error_count += len(chunk)
@@ -429,6 +473,26 @@ class GmailProvider(EmailProvider):
 
                 result.processed_count += len(chunk)
                 time.sleep(0.5)  # Throttle
+
+        # Record AFTER execution, from what actually applied. A protected sender is
+        # held (INBOX never queued for removal); a non-protected message counts as
+        # archived only if its batch succeeded. Gmail labels are additive, never a
+        # move. Recording last also means a degraded audit writer (disk-full) cannot
+        # interrupt the API calls — they are already done.
+        if audit is not None:
+            for action in actions:
+                info = pending.get(action.message_id)
+                if info is None:
+                    continue
+                applied = action.message_id in succeeded
+                audit.record(
+                    message_id=action.message_id,
+                    sender=info["sender"],
+                    protected=info["protected"],
+                    archived=info["left_inbox"] and applied,
+                    moved=False,
+                    labels_added=info["add_labels"] if applied else [],
+                )
 
         return result
 

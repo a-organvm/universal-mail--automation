@@ -30,6 +30,11 @@ from core.rules import (
     add_vip_sender,
     escalate_by_age,
     calculate_email_age_hours,
+    PROTECTED_SENDERS,
+    is_protected_sender,
+    is_archivable,
+    partition_protected,
+    normalize_sender,
 )
 from core.state import StateManager
 from core.config import Config, load_config, create_sample_config
@@ -61,6 +66,11 @@ __all__ = [
     "EscalationResult",
     "escalate_by_age",
     "calculate_email_age_hours",
+    "PROTECTED_SENDERS",
+    "is_protected_sender",
+    "is_archivable",
+    "partition_protected",
+    "normalize_sender",
     "StateManager",
     "Config",
     "load_config",

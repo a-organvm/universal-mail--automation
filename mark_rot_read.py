@@ -1,6 +1,10 @@
 """
 Mark Rot as Read
 Purpose: Mark old (>30 days) emails in low-value categories as READ to clear notification badges.
+
+LEGACY/STANDALONE — marks READ only (removes UNREAD); does NOT remove INBOX and
+does NOT enforce the protected-sender gate (core.rules.is_protected_sender). Do
+NOT extend it to archive or move out of inbox without adopting that gate first.
 """
 
 import logging

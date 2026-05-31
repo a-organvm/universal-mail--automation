@@ -2,6 +2,11 @@
 Gmail Archive Labeling Automation
 Author: Comprehensive Email Organization System
 Purpose: Exhaustively label all emails in Gmail with semantic categories
+
+LEGACY/STANDALONE — relabel-only; does NOT remove INBOX and does NOT enforce the
+protected-sender gate (core.rules.is_protected_sender). Superseded by cli.py /
+gmail_labeler.py. Do NOT extend it to archive or move out of inbox without
+adopting that gate first.
 """
 
 import re
@@ -269,8 +274,8 @@ LABEL_RULES = {
         ],
         "priority": 17,
     },
-    # Personal
-    "Personal": {"patterns": [r"youremail", r"family", r"mom", r"dad"], "priority": 18},
+    # Personal (generic keywords only; no self address hardcoded — see core.rules)
+    "Personal": {"patterns": [r"family", r"mom", r"dad"], "priority": 18},
     # Awaiting Action
     "Awaiting Reply": {"patterns": [r"awaiting.*reply", r"pending.*response"], "priority": 19},
     # Default catch-all

@@ -1,7 +1,11 @@
 """
 Bulk Sweeper - High Velocity Labeling
-Purpose: Apply changes to thousands of emails via Search Queries (Server-side) 
+Purpose: Apply changes to thousands of emails via Search Queries (Server-side)
 instead of client-side iteration. drastically reduces API calls.
+
+LEGACY/STANDALONE — relabel-only; does NOT remove INBOX and does NOT enforce the
+protected-sender gate (core.rules.is_protected_sender). Do NOT extend it to
+archive (remove INBOX) or move out of inbox without adopting that gate first.
 """
 
 import logging

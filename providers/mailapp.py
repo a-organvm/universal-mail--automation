@@ -49,6 +49,10 @@ class MailAppProvider(EmailProvider):
         ProviderCapabilities.STAR |
         ProviderCapabilities.ARCHIVE
     )
+    # Mail.app has no labels — apply_label runs an AppleScript `move` that
+    # relocates the message to a mailbox, out of the inbox. The audit records this
+    # as MOVED, and the gate suppresses it for protected senders.
+    LABEL_IS_MOVE = True
 
     def __init__(self, account: Optional[str] = None):
         """

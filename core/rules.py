@@ -7,6 +7,8 @@ and categorization functions used across all email providers.
 
 import re
 from dataclasses import dataclass
+from email.header import decode_header, make_header
+from email.utils import getaddresses, parseaddr
 from typing import Dict, List, Any, Optional, Tuple
 
 
@@ -116,11 +118,11 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
             r"xai\.com",
             r"xAI LLC",
             r"perplexity",
-            r"meta\.com",
+            r"(^|@|\.)meta\.com\b",  # anchored to the From host (not 'metabolism' etc.)
             r"ollama",
             r"sudowrite",
         ],
-        "priority": 4,
+        "priority": 12,  # de-ranked below Tech/Security (9) so login alerts win; meta.com also PROTECTED
         "tier": 3,  # Delegate - informational
         "time_sensitive": False,
     },
@@ -142,7 +144,7 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
             r"chase",
             r"capital.?one",
             r"verizon",
-            r"gemini",
+            r"(^|@|\.)gemini\.com\b",  # crypto exchange, not Google's Gemini AI
             r"experian",
             r"chime",
             r"kikoff",
@@ -150,12 +152,12 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
             r"nav\.com",
             r"bankofamerica",
             r"wellsfargo",
-            r"citi",
+            r"(^|@|\.)citi(bank|cards|group)?\.com\b",  # not 'publicity'/'felicity'
             r"usbank",
-            r"ally",
-            r"marcus",
-            r"regions",
-            r"pnc",
+            r"(^|@|\.)ally\.com\b",       # not 'really'/'Allyson'
+            r"(^|@|\.)marcus\.com\b",     # not arbitrary 'marcus'
+            r"(^|@|\.)regions\.com\b",    # not 'regions of Italy'
+            r"(^|@|\.)pnc\.com\b",
         ],
         "priority": 7,
         "tier": 1,  # Critical - financial alerts
@@ -176,7 +178,7 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
             r"vola",
             r"venmo",
             r"zelle",
-            r"att",
+            r"(^|@|\.)att\.(com|net)\b",  # AT&T domains, not 'seattle'/'attachment'/'attorney'
             r"xfinity",
             r"spectrum",
             r"conedison",
@@ -252,8 +254,8 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
             r"wayfair",
             r"chewy",
             r"zara",
-            r"hm\.com",
-            r"gap\.com",
+            r"(^|@|\.)hm\.com\b",   # not 'firmhm.com'
+            r"(^|@|\.)gap\.com\b",  # not 'mind-the-gap.com'
             r"oldnavy",
             r"nike",
             r"adidas",
@@ -262,8 +264,8 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
             r"uniqlo",
             r"lululemon",
             r"order.*confirm",
-            r"shipped",
-            r"tracking",
+            r"(order|package|item|your shipment)[\s\S]{0,20}shipp(ed|ing)",  # not 'prescription has shipped'
+            r"\btracking (number|no\.?|#|id)\b",  # shipment tracking id, not the verb 'tracking'
             r"fjallraven",
         ],
         "priority": 10,
@@ -281,7 +283,7 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
             r"trinity-health",
             r"myhealth",
         ],
-        "priority": 10,
+        "priority": 9,  # wins ties over Shopping (10) so health mail is never archived as commerce
         "tier": 2,  # Important - health matters
         "time_sensitive": True,
     },
@@ -300,7 +302,7 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
     "Travel": {
         "patterns": [
             r"united\.com",
-            r"aa\.com",
+            r"(^|@|\.)aa\.com\b",  # American Airlines, not 'panamaa.com'
             r"delta\.com",
             r"southwest",
             r"jetblue",
@@ -359,7 +361,6 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
             r"researchgate",
             r"arxiv",
             r"academia\.edu",
-            r"learning",
             r"orcid\.org",
         ],
         "priority": 13,
@@ -384,9 +385,10 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
         "time_sensitive": True,
     },
     "Professional/Legal": {
+        # Generic legal cues only. A specific firm's mail is identified for
+        # PROTECTION via the gitignored local config, not hardcoded here (PII).
         "patterns": [
             r"legalzoom",
-            r"example-lawfirm",
             r"law\.com",
             r"attorney",
             r"legal.*notice",
@@ -397,7 +399,11 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
     },
     # Domain Services
     "Services/Domain": {
-        "patterns": [r"namecheap", r"godaddy", r"domain.*renew", r"dns", r"e\.godaddy\.com"],
+        "patterns": [
+            r"namecheap", r"godaddy", r"domain.*renew",
+            r"\b(dns (record|zone|settings)|nameserver)\b",  # not any literal 'dns' run
+            r"e\.godaddy\.com",
+        ],
         "priority": 15,
         "tier": 2,  # Important - domain renewals critical
         "time_sensitive": True,
@@ -424,11 +430,11 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
         "patterns": [
             r"unsubscribe",
             r"newsletter",
-            r"promo",
+            r"\bpromo(tion|tional)?\b",
             r"special.*offer",
-            r"offer",
+            r"(% ?off|limited[- ]time|exclusive offer|flash sale|use code|coupon)",
             r"discount",
-            r"sale",
+            r"(flash sale|\d+% ?off|clearance sale)",
             r"hims",
             r"substack",
             r"scaleclients",
@@ -448,10 +454,10 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
     "Tech/Storage": {
         "patterns": [
             r"filerev",
-            r"box\.com",
+            r"(^|@|\.)box\.com\b",   # not 'toolbox.com'
             r"onedrive",
             r"gdrive",
-            r"icloud",
+            r"(^|@|\.)icloud\.com\b",  # the iCloud product domain, NOT every Hide-My-Email relay
             r"sync\.com",
         ],
         "priority": 17,
@@ -475,9 +481,11 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
         "tier": 1,  # Critical - government matters
         "time_sensitive": True,
     },
-    # Personal
+    # Personal — self mail is identified/protected by the gate (_self_match +
+    # SELF_LOCALPARTS, loaded from the gitignored local config), so no self
+    # address is hardcoded here. These are generic relationship keywords only.
     "Personal": {
-        "patterns": [r"youremail", r"family", r"mom", r"dad"],
+        "patterns": [r"family", r"mom", r"dad"],
         "priority": 18,
         "tier": 1,  # Critical - personal emails
         "time_sensitive": True,
@@ -511,6 +519,306 @@ KEEP_IN_INBOX = {
     "Personal",
     "Awaiting Reply",
 }
+
+
+# ============================================================================
+# PROTECTED SENDERS — HARD, FAIL-CLOSED NEVER-ARCHIVE GATE
+# ============================================================================
+# The product's headline safety guarantee. This gate is SENDER-based (not
+# label-based), so it does NOT depend on correct categorization: a protected
+# sender is shielded even if a noise rule would otherwise match it.
+#
+# Enforcement contract — every triage path MUST obey this before any archive/move:
+#   1. For each candidate message, call is_protected_sender(from_header).
+#   2. If True, DROP it from the action set (never remove INBOX, never move out
+#      of inbox). Enforce at the choke point, NOT merely as a query-time filter.
+#   3. FAIL CLOSED: an empty/unparseable sender is treated as protected.
+#
+# MATCHING SEMANTICS (hardened 2026-05-31 — see normalize_sender):
+# Protection is decided on the PARSED, decoded REAL domain of the addr-spec, with
+# subdomain-boundary semantics (domain == entry OR domain endswith '.'+entry) —
+# NOT a raw substring of the From header. This closes the fail-OPEN class where a
+# byte-level transform of the dots hid a genuinely protected sender:
+#   • iCloud Hide My Email / privaterelay rewrites ("example-lawfirm_com_TOKEN@icloud.com")
+#   • RFC 2047 encoded-words ("=?utf-8?B?...?=")
+#   • IDN / punycode ("xn--...")
+#   • Gmail dot/plus canonicalization of the self mailbox
+# and the fail-CLOSED-WRONG class where containment over-matched
+# ("purchase.com" ⊃ "chase.com"; display-name spoofs; subdomain left-label spoofs).
+# A specific subdomain (alerts.example-bank.com) still protects only that stream
+# and not a sibling marketing stream (example-bank-marketing.com). Any US *.gov sender
+# (terminal label, on the recovered domain) is auto-protected.
+
+# PRIVACY: this is a PUBLIC repo. A user's real protected list (their lawyer,
+# banks, government accounts, employers, self) is a sensitive relationship/finance
+# map and MUST NOT be committed. So the code ships only GENERIC, non-PII defaults
+# (universal platform/security/gov/e-sign services any user would want) plus clearly
+# SYNTHETIC examples; each user supplies their own specifics via a gitignored local
+# config (PROTECTED_SENDERS_FILE or ./config/protected_senders.local.txt), which is
+# MERGED in at import. The gate LOGIC is identical regardless of the data source.
+EXAMPLE_PROTECTED_SENDERS: List[str] = [
+    # --- Generic, non-PII services (safe, sensible defaults for everyone) ---
+    "docusign.net",                                  # e-signature (legal docs)
+    "irs.gov", "ssa.gov", "studentaid.gov", "login.gov",  # US government
+    "apple.com", "appleid.com",  # appleid.com covers privaterelay.appleid.com + e.appleid.com
+    "google.com", "accounts.google.com", "anthropic.com",
+    "1password.com", "meta.com", "facebookmail.com",  # account-takeover alert backstops
+    # --- SYNTHETIC placeholders (replace with your real entries in the local file) ---
+    "example-lawfirm.com",                           # your attorney's domain
+    "example-bank.com", "alerts.example-bank.com",   # your bank (account/alerts only)
+    "example-nonprofit.org",                         # an org you have a relationship with
+    # NOTE: 'example-bank-marketing.com' is intentionally NOT here — it documents
+    # that a sibling MARKETING domain is not protected just because the bank is.
+]
+
+# iCloud relay carriers whose local-part encodes the real sender's address.
+RELAY_DOMAINS = {"icloud.com", "privaterelay.appleid.com"}
+# Gmail mailboxes that canonicalize away dots and +tags in the local part.
+GMAIL_DOMAINS = {"gmail.com", "googlemail.com"}
+# Synthetic self placeholder; the real self mailbox(es) load from the local config.
+EXAMPLE_SELF_LOCALPARTS = {"youremail"}
+
+
+def _load_local_protected() -> Tuple[List[str], set]:
+    """Load the user's REAL protected domains + self mailboxes from a gitignored
+    local config so PII never enters this PUBLIC repo.
+
+    Format: one entry per line; blank lines and '#' comments ignored; a line
+    'self: <localpart-or-address>' registers a self mailbox (dots stripped, Gmail
+    canonical). Path: $PROTECTED_SENDERS_FILE, else ./config/protected_senders.local.txt.
+    Absent file -> empty (the example defaults still apply). Never raises.
+    """
+    import os
+    path = os.environ.get("PROTECTED_SENDERS_FILE") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "config", "protected_senders.local.txt",
+    )
+    domains: List[str] = []
+    selfs: set = set()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.split("#", 1)[0].strip()
+                if not line:
+                    continue
+                if line.lower().startswith("self:"):
+                    lp = line.split(":", 1)[1].strip().lower().split("@")[0].replace(".", "")
+                    if lp:
+                        selfs.add(lp)
+                else:
+                    domains.append(line.lower())
+    except (FileNotFoundError, OSError):
+        pass
+    return domains, selfs
+
+
+_local_domains, _local_selfs = _load_local_protected()
+# Real entries (from the gitignored local file) are MERGED with the shipped
+# examples; the example domains never receive real mail, so the merge is harmless.
+PROTECTED_SENDERS: List[str] = list(dict.fromkeys(EXAMPLE_PROTECTED_SENDERS + _local_domains))
+# Self mailbox(es), dot/plus-canonicalized (dots stripped, lowercased).
+SELF_LOCALPARTS = EXAMPLE_SELF_LOCALPARTS | _local_selfs
+
+
+def _decode_mime(raw: str) -> str:
+    """RFC 2047-decode encoded-words ('=?utf-8?B?...?=') to plain text.
+
+    Done BEFORE parsing so an encoded From can never hide the real address from
+    the gate. Never raises — falls back to the raw header on any decode error.
+    """
+    try:
+        return str(make_header(decode_header(raw)))
+    except Exception:
+        return raw
+
+
+def _idna_decode(domain: str) -> str:
+    """Punycode (xn--) -> Unicode per label, so an IDN/homoglyph domain is
+    compared on its U-label, not its opaque A-label. Per-label and crash-safe:
+    an undecodable label is left as-is rather than failing the whole gate."""
+    out = []
+    for lbl in domain.split("."):
+        if lbl.startswith("xn--"):
+            try:
+                out.append(lbl.encode("ascii").decode("idna"))
+            except Exception:
+                out.append(lbl)  # leave A-label on failure; never crash the gate
+        else:
+            out.append(lbl)
+    return ".".join(out)
+
+
+def _gov_protected(domain: str) -> bool:
+    """US .gov only, anchored to the TERMINAL label of the recovered domain.
+    'irs.gov' -> True; 'irs.gov.attacker.com' -> False; 'service.gov.uk' -> False.
+    A '.gov' in a local part can never reach here (we only ever pass the domain)."""
+    return bool(domain) and domain.split(".")[-1] == "gov"
+
+
+def _domain_matches(domain: str, entry: str) -> bool:
+    """Boundary match: equality OR proper subdomain. Kills substring embeds
+    ('purchase.com' != 'chase.com') and left-label spoofs
+    ('example-lawfirm.com.attacker.example' does not end with '.example-lawfirm.com')."""
+    return domain == entry or domain.endswith("." + entry)
+
+
+def _is_protected_domain(domain: str) -> bool:
+    """True if the recovered real domain is government or matches a protected
+    entry on a domain/subdomain boundary."""
+    if not domain:
+        return False
+    if _gov_protected(domain):
+        return True
+    return any(_domain_matches(domain, e) for e in PROTECTED_SENDERS)
+
+
+def _relay_domain_candidates(local: str) -> set:
+    """Recover candidate real domains from an iCloud relay local-part.
+
+    iCloud Hide My Email / forwarding rewrites the real sender into the local
+    part with dots-as-underscores, e.g. 'user_at_example-lawfirm_com_TOKEN' or
+    'example-lawfirm_com_TOKEN'. The trailing random token may itself be MULTI-segment
+    ('..._tok_tok'), so we generate a candidate for EVERY progressive truncation
+    of trailing underscore-segments (not just one). Over-recovery only ever
+    protects MORE — the safe direction for a fail-closed gate."""
+    s = local.lower()
+    base = s.partition("_at_")[2] if "_at_" in s else s
+    parts = base.split("_")
+    # full form + each prefix formed by dropping 1..N trailing segments
+    variants = {"_".join(parts[:k]) for k in range(1, len(parts) + 1)}
+    cands = set()
+    for v in variants:
+        dom = v.replace("_", ".").strip(".")
+        if "." in dom:
+            cands.add(dom)
+    return cands
+
+
+def _best_relay_domain(cands: set) -> str:
+    """Pick the most-likely REAL domain from relay candidates for categorization.
+    Prefer a candidate whose terminal label looks like a TLD (all-alpha) and the
+    fewest labels (the token-appended variant carries a junk last label)."""
+    real = [c for c in cands
+            if c.split(".")[-1].isalpha() and 2 <= len(c.split(".")[-1]) <= 18]
+    return min(real, key=lambda c: c.count(".")) if real else ""
+
+
+def _resolve_addr(addr: Optional[str]) -> Tuple[str, str]:
+    """Resolve a SINGLE addr-spec to (email, real_domain).
+
+    rpartition on the LAST '@' (so a quoted local part carrying a protected token
+    can't win), strip/lower/trailing-dot, IDNA-decode, then iCloud-relay-decode.
+    Returns ('', '') when there is no parseable domain (caller fails closed).
+    """
+    addr = (addr or "").strip().strip("<>")
+    if "@" not in addr:
+        return ("", "")
+    local, _, domain = addr.rpartition("@")
+    domain = domain.strip().strip("<>").rstrip(".").lower()
+    domain = _idna_decode(domain)
+    if domain in RELAY_DOMAINS or domain.endswith(".appleid.com"):
+        cands = _relay_domain_candidates(local)
+        # Protection first: if ANY recovered candidate is protected, surface it.
+        for cand in cands:
+            if _is_protected_domain(cand):
+                if "_at_" in local.lower():
+                    user = local.lower().partition("_at_")[0]
+                    return (f"{user}@{cand}", cand)
+                return ("", cand)
+        # Not protected, but still prefer the recovered REAL domain over the
+        # carrier so relay mail is categorized by its true sender (an unknown
+        # sender then falls to Misc/Other and is KEPT, not archived as storage).
+        real = _best_relay_domain(cands)
+        if real:
+            return ("", real)
+        # Undecodable relay local-part (Apple's own 'noreply'/'id'): keep the
+        # carrier/appleid domain so appleid.com still matches the gate.
+    return (addr, domain)
+
+
+def normalize_sender(raw_from: Optional[str]) -> Tuple[str, str, str]:
+    """Parse a raw From header into (display, email, domain) for the FIRST/primary
+    address (used by categorization). The protection gate uses every address —
+    see is_protected_sender / _iter_sender_domains.
+
+    - RFC 2047-decodes encoded-words BEFORE parsing.
+    - RFC 5322-parses via parseaddr (the display NAME never feeds the gate).
+    - Detects iCloud/privaterelay/appleid relay local-parts and recovers the
+      embedded REAL domain; IDNA/punycode-decodes the domain.
+    Returns ('', '', '') for empty input and ('<display>', '', '') for an
+    unparseable address, so the caller fails closed on an empty domain.
+    """
+    if not raw_from or not raw_from.strip():
+        return ("", "", "")
+    decoded = _decode_mime(raw_from)
+    display, addr = parseaddr(decoded)
+    if "@" not in addr:
+        cand = decoded.strip().strip("<>")
+        addr = cand if "@" in cand else ""
+    email_, domain = _resolve_addr(addr)
+    if not domain:
+        return (display, "", "")
+    return (display, email_, domain)
+
+
+def _iter_sender_domains(raw_from: str):
+    """Yield (email, domain) for EVERY address in a (possibly multi-address) From,
+    each relay/MIME/IDNA-decoded. The gate matches the UNION so a protected sender
+    listed alongside others (e.g. 'Lawyer <a@firm>, Assistant <b@bulk>') can't
+    escape via the last-'@' rule. Addresses with no resolvable domain are skipped."""
+    decoded = _decode_mime(raw_from)
+    for _disp, addr in getaddresses([decoded]):
+        email_, domain = _resolve_addr(addr)
+        if domain:
+            yield (email_, domain)
+
+
+def _self_match(addr: str, domain: str) -> bool:
+    """Gmail dot/plus canonicalization for the self mailbox: e.g. 'your.email',
+    'youremail', 'y.o.u.r.e.m.a.i.l', and 'youremail+tag' are one mailbox.
+    Real self localparts are loaded into SELF_LOCALPARTS from the local config."""
+    if domain not in GMAIL_DOMAINS:
+        return False
+    local = addr.rpartition("@")[0].lower().split("+", 1)[0].replace(".", "")
+    return local in SELF_LOCALPARTS
+
+
+def is_protected_sender(sender: Optional[str]) -> bool:
+    """Hard gate: True if this sender must NEVER be archived / moved out of inbox.
+
+    FAIL CLOSED: empty/None/unparseable sender returns True (protect on
+    uncertainty). Matches the UNION over EVERY address in the From (so a protected
+    sender listed first or second in a multi-address header can't escape), each on
+    its parsed, relay/MIME/IDNA-decoded REAL domain with subdomain-boundary
+    semantics, plus a US-.gov terminal-label rule and a Gmail-canonicalized self
+    match. The raw header's display name NEVER participates in the decision.
+    """
+    if not sender or not sender.strip():
+        return True  # fail closed: never archive what we can't identify
+    saw_domain = False
+    for addr, domain in _iter_sender_domains(sender):
+        saw_domain = True
+        if _gov_protected(domain) or _self_match(addr, domain) or _is_protected_domain(domain):
+            return True
+    # No resolvable address at all -> fail closed; otherwise no address matched.
+    return not saw_domain
+
+
+def is_archivable(sender: Optional[str]) -> bool:
+    """Convenience inverse of is_protected_sender() for filtering action sets."""
+    return not is_protected_sender(sender)
+
+
+def partition_protected(senders_by_id: Dict[str, str]) -> Tuple[List[str], List[str]]:
+    """Split {message_id: from_header} into (archivable_ids, protected_ids).
+
+    The protected count is the trust receipt every run should report.
+    """
+    archivable: List[str] = []
+    protected: List[str] = []
+    for msg_id, sender in senders_by_id.items():
+        (protected if is_protected_sender(sender) else archivable).append(msg_id)
+    return archivable, protected
 
 
 # ============================================================================

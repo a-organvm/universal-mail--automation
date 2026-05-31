@@ -3,9 +3,17 @@ credentials.json
 token.pickle
 client_secret_*.json
 
+# Local protected-sender list (PII: real lawyer/banks/gov/self) — never commit.
+# Use config/protected_senders.example.txt as the template.
+config/protected_senders.local.txt
+
 # Logs
 *.log
 gmail_labeler.log
+
+# Triage audit receipts (PII: real sender addresses) — never commit.
+# audit/README.md documents the format and is tracked; the receipts are not.
+audit/*.jsonl
 
 # Python
 __pycache__/
