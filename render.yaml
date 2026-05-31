@@ -1,0 +1,14 @@
+# Render blueprint — one-click-ish deploy of the API + dashboard.
+# https://render.com/docs/blueprint-spec   Deploy: push, then "New + > Blueprint".
+services:
+  - type: web
+    name: universal-mail-automation
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Provider credentials are NOT committed. Set them in the Render dashboard
+      # (or a synced secret group). See DEPLOY.md for the per-provider list.
+      - key: PYTHONUNBUFFERED
+        value: "1"
