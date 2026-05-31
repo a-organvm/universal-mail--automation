@@ -15,9 +15,13 @@ Environment:
 
 import argparse
 import logging
+import os
 import sys
 import time
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.audit import AuditLog
 
 from core.rules import (
     LABEL_RULES,
@@ -104,6 +108,7 @@ def run_labeler(
     state_file: Optional[str],
     tier_routing: bool = False,
     vip_only: bool = False,
+    audit: Optional["AuditLog"] = None,
 ) -> ProcessingResult:
     """
     Run the labeling process on the given provider.
@@ -170,6 +175,16 @@ def run_labeler(
                 # — the provider chokepoint (apply_actions) enforces it again.
                 if is_protected_sender(msg.sender):
                     protected_count += 1
+                    # Record the held-in-inbox decision HERE — this is the first
+                    # (decision-layer) place protection fires, before any action is
+                    # built, so the receipt's protected_held count is complete and
+                    # not just whatever happened to reach the provider chokepoint.
+                    if audit is not None:
+                        audit.record(
+                            message_id=msg_id,
+                            sender=msg.sender,
+                            protected=True,
+                        )
                     continue
 
                 # VIP-only mode: skip non-VIP senders
@@ -229,7 +244,7 @@ def run_labeler(
 
             # Apply actions
             if actions and not dry_run:
-                batch_result = provider.apply_actions(actions)
+                batch_result = provider.apply_actions(actions, audit=audit)
                 result.success_count += batch_result.success_count
                 result.error_count += batch_result.error_count
                 result.errors.extend(batch_result.errors)
@@ -300,6 +315,68 @@ def print_stats(result: ProcessingResult) -> None:
     print("=" * 50 + "\n")
 
 
+def _make_audit(args: argparse.Namespace, kind: str) -> "Optional[AuditLog]":
+    """Build the trust receipt for an apply run, or None when disabled / dry-run.
+
+    ``kind`` selects the default filename (``audit/<provider>-<kind>.jsonl``). When
+    senders are recorded un-redacted, warn about the PII — and warn harder when the
+    chosen path is OUTSIDE the gitignored ``audit/`` directory, since that file is
+    not auto-ignored and the repo's history has held real addresses before.
+    """
+    if getattr(args, "no_audit", False) or getattr(args, "dry_run", False):
+        return None
+    from core.audit import AuditLog
+
+    default_path = f"audit/{args.provider}-{kind}.jsonl"
+    audit_path = getattr(args, "audit_file", None) or default_path
+    redact = getattr(args, "redact_audit", False)
+
+    if not redact:
+        norm = os.path.normpath(audit_path)
+        in_audit_dir = norm == "audit" or norm.startswith("audit" + os.sep)
+        if in_audit_dir:
+            logger.warning(
+                "Triage receipt %s will contain REAL sender addresses (PII). The "
+                "audit/ directory is gitignored — do not commit it, or pass "
+                "--redact-audit for a shareable domain-only receipt.", audit_path,
+            )
+        else:
+            logger.warning(
+                "Triage receipt %s is OUTSIDE the gitignored audit/ directory and "
+                "will contain REAL sender addresses (PII). It is NOT auto-ignored by "
+                "git — add it to .gitignore or pass --redact-audit before committing.",
+                audit_path,
+            )
+    return AuditLog(path=audit_path, provider=args.provider, redact=redact)
+
+
+def _report_audit(audit: "Optional[AuditLog]") -> bool:
+    """Print the receipt line + path; return True if the invariant was violated.
+
+    Also surfaces a degraded write (disk-full / unwritable path): the invariant is
+    still checked in memory, but the caller is told no file was persisted.
+    """
+    if audit is None:
+        return False
+    print(audit.receipt_line())
+    if audit.write_error:
+        print(
+            f"⚠ Audit receipt could NOT be written to {audit.path} "
+            f"({audit.write_error}); invariant was still checked in-memory."
+        )
+    else:
+        print(f"Audit receipt appended to: {audit.path}")
+    if audit.summary()["violations"]:
+        # The gate and its independent audit disagree — treat the run as
+        # untrustworthy. This should be unreachable; surfacing it is the point.
+        logger.critical(
+            "PROTECTED-SENDER GATE VIOLATION — a protected message was archived/moved. "
+            "Review the receipt immediately."
+        )
+        return True
+    return False
+
+
 def cmd_label(args: argparse.Namespace) -> int:
     """Handle the 'label' subcommand."""
     # Load config and apply VIP senders
@@ -315,6 +392,11 @@ def cmd_label(args: argparse.Namespace) -> int:
         use_gmail_extensions=args.gmail_extensions,
     )
 
+    # Trust receipt: on an APPLY run, record every post-gate disposition to an
+    # append-only JSONL so the protected-sender guarantee is provable, not implicit.
+    # Dry-run previews via print_stats below and writes no receipt.
+    audit = _make_audit(args, kind="triage")
+
     with provider:
         result = run_labeler(
             provider=provider,
@@ -325,9 +407,14 @@ def cmd_label(args: argparse.Namespace) -> int:
             state_file=args.state_file,
             tier_routing=args.tier_routing,
             vip_only=args.vip_only,
+            audit=audit,
         )
 
     print_stats(result)
+
+    violation = _report_audit(audit)
+    if violation:
+        return 2
     return 0 if result.error_count == 0 else 1
 
 
@@ -712,6 +799,11 @@ def cmd_escalate(args: argparse.Namespace) -> int:
     )
 
     has_categories = provider.capabilities & ProviderCapabilities.CATEGORIES
+    # Trust receipt on the escalate path too: escalate only raises tier today, but
+    # it funnels through apply_actions (the gate) and the receipt makes that
+    # coverage provable — and future-proofs the path if target_folder ever moves
+    # mail. Same gitignored default + PII handling as `label`.
+    audit = _make_audit(args, kind="escalate")
     result = ProcessingResult()
     escalated_count = 0
     checked_count = 0
@@ -791,7 +883,7 @@ def cmd_escalate(args: argparse.Namespace) -> int:
 
         # Apply escalation actions
         if actions:
-            batch_result = provider.apply_actions(actions)
+            batch_result = provider.apply_actions(actions, audit=audit)
             result.success_count += batch_result.success_count
             result.error_count += batch_result.error_count
             result.errors.extend(batch_result.errors)
@@ -811,6 +903,8 @@ def cmd_escalate(args: argparse.Namespace) -> int:
             print(f"  - {err}")
     print("=" * 50 + "\n")
 
+    if _report_audit(audit):
+        return 2
     return 0 if result.error_count == 0 else 1
 
 
@@ -910,6 +1004,23 @@ Examples:
         action="store_true",
         help="Only process emails from VIP senders (defined in config)",
     )
+    label_parser.add_argument(
+        "--audit-file",
+        help="Path for the append-only triage receipt "
+             "(default: audit/<provider>-triage.jsonl). Only the default audit/ "
+             "directory is gitignored; a custom path is NOT auto-ignored and may "
+             "contain real senders — see --redact-audit.",
+    )
+    label_parser.add_argument(
+        "--no-audit",
+        action="store_true",
+        help="Disable the trust receipt (not recommended for apply runs)",
+    )
+    label_parser.add_argument(
+        "--redact-audit",
+        action="store_true",
+        help="Record sender DOMAIN only (no local-part) — produces a shareable receipt",
+    )
     label_parser.set_defaults(func=cmd_label)
 
     # Report command
@@ -949,6 +1060,23 @@ Examples:
         "--dry-run", "-n",
         action="store_true",
         help="Don't actually apply changes",
+    )
+    escalate_parser.add_argument(
+        "--audit-file",
+        help="Path for the append-only triage receipt "
+             "(default: audit/<provider>-escalate.jsonl). Only the default audit/ "
+             "directory is gitignored; a custom path is NOT auto-ignored and may "
+             "contain real senders — see --redact-audit.",
+    )
+    escalate_parser.add_argument(
+        "--no-audit",
+        action="store_true",
+        help="Disable the trust receipt (not recommended for apply runs)",
+    )
+    escalate_parser.add_argument(
+        "--redact-audit",
+        action="store_true",
+        help="Record sender DOMAIN only (no local-part) — produces a shareable receipt",
     )
     escalate_parser.set_defaults(func=cmd_escalate)
 

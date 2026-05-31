@@ -7,11 +7,14 @@ enabling consistent behavior across Gmail, IMAP, Mail.app, and Outlook.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional, Iterator, Dict, Any, Tuple
+from typing import List, Optional, Iterator, Dict, Any, Tuple, TYPE_CHECKING
 from enum import Flag, auto
 
 from core.models import EmailMessage, LabelAction, ProcessingResult
 from core.rules import is_protected_sender
+
+if TYPE_CHECKING:  # avoid any import-time coupling; AuditLog is duck-typed at runtime
+    from core.audit import AuditLog
 
 
 class ProviderCapabilities(Flag):
@@ -62,6 +65,17 @@ class EmailProvider(ABC):
 
     name: str = "abstract"
     capabilities: ProviderCapabilities = ProviderCapabilities.NONE
+
+    # Whether this provider's apply_label() physically MOVES a message out of the
+    # inbox (vs. adding an additive label that leaves it in place). True for
+    # folder providers whose only "label" is the containing folder (Outlook,
+    # Mail.app). False for Gmail (additive labels) AND for IMAP — even with
+    # X-GM-LABELS, apply_label is +X-GM-LABELS / a COPY that leaves the original
+    # in the inbox; IMAP's out-of-inbox departure happens via remove_label("INBOX")
+    # or archive(), which are observed directly. Drives MOVED-vs-LABELED in the
+    # audit receipt so the disposition reflects real semantics, not a capability
+    # proxy. See core/audit.py.
+    LABEL_IS_MOVE: bool = False
 
     def __enter__(self) -> "EmailProvider":
         """Context manager entry - establish connection."""
@@ -290,7 +304,11 @@ class EmailProvider(ABC):
         ]
         return True
 
-    def apply_actions(self, actions: List[LabelAction]) -> ProcessingResult:
+    def apply_actions(
+        self,
+        actions: List[LabelAction],
+        audit: Optional["AuditLog"] = None,
+    ) -> ProcessingResult:
         """
         Apply a batch of label actions.
 
@@ -299,27 +317,42 @@ class EmailProvider(ABC):
 
         Args:
             actions: List of LabelAction objects to apply
+            audit: Optional AuditLog. When supplied, each message's post-gate
+                disposition (protected_held / archived / moved / labeled / kept)
+                is recorded as an independent trust receipt — see core/audit.py.
 
         Returns:
             ProcessingResult with statistics and any errors
         """
         result = ProcessingResult()
+        is_folder = bool(self.capabilities & ProviderCapabilities.FOLDERS)
         for action in actions:
             protected = self._drop_if_protected(action)
-            # For FOLDER providers, applying a category label IS itself an
-            # out-of-inbox MOVE (Outlook/Mailapp apply_label moves the message),
-            # so a protected sender must not have labels applied either.
-            move_via_label = protected and bool(self.capabilities & ProviderCapabilities.FOLDERS)
+            # For providers where apply_label IS a move (Outlook/Mail.app), a
+            # protected sender must not have labels applied either — that would
+            # itself move the message out of the inbox.
+            move_via_label = protected and self.LABEL_IS_MOVE
+            # Observe what ACTUALLY happens, so the audit is a post-hoc witness of
+            # real operations rather than a re-reading of the (gate-mutated) action.
+            did_leave_inbox = False     # archive() or INBOX-removal actually ran
+            did_label_move = False      # a move-on-label apply_label() actually ran
+            applied_labels = []
             try:
                 if not move_via_label:
                     for label in action.add_labels:
                         self.ensure_label_exists(label)
                         if self.apply_label(action.message_id, label):
                             result.add_label_stat(label)
+                            applied_labels.append(label)
+                            if self.LABEL_IS_MOVE:
+                                did_label_move = True
                 for label in action.remove_labels:
-                    self.remove_label(action.message_id, label)
+                    if self.remove_label(action.message_id, label) and \
+                            label.upper() in ("INBOX", "\\INBOX"):
+                        did_leave_inbox = True
                 if action.archive:
-                    self.archive(action.message_id)
+                    if self.archive(action.message_id):
+                        did_leave_inbox = True
                 if action.star:
                     self.star(action.message_id, due_date=action.due_date)
                 if action.category:
@@ -333,6 +366,28 @@ class EmailProvider(ABC):
                 result.error_count += 1
                 result.errors.append(f"{action.message_id}: {e}")
             result.processed_count += 1
+
+            if audit is not None:
+                # Record AFTER execution, from the operations that actually ran.
+                # Folder provider: leaving the inbox (by removal or move-on-label)
+                # is a MOVE; label provider: INBOX-removal/archive is an ARCHIVE.
+                # No `and not protected` fudge — if a regressed gate let a protected
+                # message leave the inbox, archived/moved is TRUE here so the
+                # receipt's invariant check fires instead of being silenced.
+                if is_folder:
+                    moved = did_leave_inbox or did_label_move
+                    archived = False
+                else:
+                    archived = did_leave_inbox
+                    moved = False
+                audit.record(
+                    message_id=action.message_id,
+                    sender=action.sender,
+                    protected=protected,
+                    archived=archived,
+                    moved=moved,
+                    labels_added=applied_labels,
+                )
         return result
 
     def get_label_cache(self) -> Dict[str, str]:

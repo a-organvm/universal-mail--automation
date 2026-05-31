@@ -96,6 +96,10 @@ class OutlookProvider(EmailProvider):
         ProviderCapabilities.ARCHIVE |
         ProviderCapabilities.CATEGORIES
     )
+    # apply_label issues a Graph /move — it physically relocates the message out
+    # of the inbox. The audit must record such an action as MOVED, and the gate
+    # must suppress it for protected senders (see base.apply_actions).
+    LABEL_IS_MOVE = True
 
     def __init__(
         self,

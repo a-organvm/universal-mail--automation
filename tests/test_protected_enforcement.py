@@ -55,9 +55,17 @@ class RecordingProvider(EmailProvider):
 
 
 class RecordingFolderProvider(RecordingProvider):
-    """Folder-style provider: applying a label IS an out-of-inbox MOVE."""
+    """Folder-style provider: applying a label IS an out-of-inbox MOVE.
+
+    Models the real move-on-label providers (Outlook Graph /move, Mail.app
+    AppleScript move). Under the corrected design the FOLDERS capability alone
+    no longer implies a move — the provider must declare ``LABEL_IS_MOVE`` so
+    the gate suppresses the label for protected senders and the audit records
+    the disposition as a move rather than an additive label.
+    """
     name = "recording-folder"
     capabilities = ProviderCapabilities.FOLDERS | ProviderCapabilities.ARCHIVE
+    LABEL_IS_MOVE = True
 
 
 class TestDropIfProtected:

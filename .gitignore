@@ -11,6 +11,10 @@ config/protected_senders.local.txt
 *.log
 gmail_labeler.log
 
+# Triage audit receipts (PII: real sender addresses) — never commit.
+# audit/README.md documents the format and is tracked; the receipts are not.
+audit/*.jsonl
+
 # Python
 __pycache__/
 *.py[cod]
