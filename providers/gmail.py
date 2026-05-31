@@ -421,14 +421,21 @@ class GmailProvider(EmailProvider):
                 add_ids.append(star_id)
 
             if audit is not None:
-                # "Left inbox" for Gmail == INBOX is in the removeLabelIds the API
-                # will actually receive (post-gate). Resolved to archived=True only
-                # if the batch SUCCEEDS, below — no over-count on API failure.
+                # "Left inbox" for Gmail == the INBOX label is in the removeLabelIds
+                # the API will actually receive (post-gate). Resolve the INBOX id
+                # through the label cache — Gmail's system INBOX id IS the literal
+                # "INBOX", but never let a non-literal/aliased id hide a real
+                # departure — and match case-insensitively on both "INBOX"/"\\INBOX"
+                # forms, mirroring the base-provider path (base.py). Resolved to
+                # archived=True only if the batch SUCCEEDS, below — no over-count on
+                # API failure. Broadening only: can add violations, never hide one.
+                inbox_id = str(self._label_cache.get("INBOX", "INBOX")).upper()
+                _inbox_forms = {"INBOX", "\\INBOX", inbox_id}
                 pending[action.message_id] = {
                     "sender": action.sender,
                     "protected": protected,
                     "add_labels": list(action.add_labels),
-                    "left_inbox": any(rid == "INBOX" for rid in remove_ids),
+                    "left_inbox": any(str(rid).upper() in _inbox_forms for rid in remove_ids),
                 }
 
             key = (tuple(sorted(add_ids)), tuple(sorted(remove_ids)))

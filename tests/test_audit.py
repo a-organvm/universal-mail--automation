@@ -301,6 +301,48 @@ class TestChokepointIntegration:
         assert s["moved"] == 0               # Gmail labels are additive, never moves
         assert s["violations"] == []
 
+    def test_gmail_inbox_removal_via_aliased_cache_id_is_caught(self, tmp_path, monkeypatch):
+        """Hardening regression (2026-05-31 adversarial pass — two convergent lenses).
+
+        The Gmail override must observe inbox departure even when the INBOX label
+        resolves to a NON-literal id through the label cache. Here a regressed gate
+        fails to strip INBOX, and the provider's cache maps INBOX -> "Label_INBOX_99",
+        so a protected sender is de-inboxed via the cache-resolved remove_labels path
+        (NOT the action.archive path, which appends the literal "INBOX" the old check
+        already caught). The old literal `rid == "INBOX"` match recorded archived=False
+        and MISSED the breach; resolving the INBOX id through the cache catches it.
+        Fails on the pre-hardening code, passes after.
+        """
+        pytest.importorskip("googleapiclient")
+        import providers.gmail as gmod
+        monkeypatch.setattr(gmod.time, "sleep", lambda *_a, **_k: None)
+
+        class _Exec:
+            def execute(self): return {}
+
+        class _Messages:
+            def batchModify(self, userId, body): return _Exec()
+
+        class _Users:
+            def messages(self): return _Messages()
+
+        class _Service:
+            def users(self): return _Users()
+
+        gp = gmod.GmailProvider(service=_Service())
+        gp.ensure_label_exists = lambda label: label
+        gp._execute_with_backoff = lambda fn, _desc: fn()
+        gp._label_cache = {"INBOX": "Label_INBOX_99"}   # INBOX id is NOT the literal
+        gp._drop_if_protected = lambda action: False     # gate regressed: does not strip
+
+        log = AuditLog(path=str(tmp_path / "r.jsonl"), provider="gmail")
+        gp.apply_actions([
+            LabelAction(message_id="prot", sender=PROTECTED, remove_labels=["INBOX"]),
+        ], audit=log)
+        assert log.summary()["violations"] == ["prot"]   # departure observed despite alias
+        with pytest.raises(AuditInvariantError):
+            log.assert_no_violations()
+
 
 class _FakeLister(_Recording):
     """A label provider that returns two messages (one protected, one noise)."""
