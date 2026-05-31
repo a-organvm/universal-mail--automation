@@ -84,3 +84,21 @@ def _run(req: schemas.TriageRequest, *, dry_run: bool) -> dict:
             detail="SAFETY GATE VIOLATION: a protected sender was moved out of "
             "the inbox; the run was rejected.",
         )
+
+
+# --- Static web frontend ------------------------------------------------------
+# A zero-build dashboard served by the same app (same origin -> no CORS); it
+# calls the JSON API above. Mounted last so it never shadows /health or /v1.
+from pathlib import Path  # noqa: E402
+
+from fastapi.responses import RedirectResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+_WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+if _WEB_DIR.is_dir():
+
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        return RedirectResponse(url="/app/")
+
+    app.mount("/app", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")
