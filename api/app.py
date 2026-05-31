@@ -1,23 +1,57 @@
 """FastAPI application — the product's HTTP surface.
 
 Endpoints:
-  GET  /health              liveness
-  POST /v1/senders/check    is this sender protected? (pure, no mailbox)
-  POST /v1/triage/preview   dry-run: what WOULD be moved (nothing touched)
-  POST /v1/triage           run a triage (fail-closed on gate violation)
+  GET  /health                          liveness
+  POST /v1/senders/check                is this sender protected? (pure, no mailbox)
+  POST /v1/triage/preview               dry-run: what WOULD be moved (nothing touched)
+  POST /v1/triage                       run a triage (fail-closed on gate violation)
+  GET  /v1/audit/{run_id}               signed, re-derivable audit receipt
+  GET  /v1/billing/plans                public pricing catalog (no creds)
+  POST /v1/billing/{checkout,portal,webhook}   Stripe subscription billing
+  *    /acp/*                           Agentic Commerce Protocol (agent checkout)
+  *    /mcp                             Model Context Protocol (when mcp SDK present)
+  GET  /app                             static dashboard
 
 Run locally:  uvicorn api.app:app --reload
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import secrets
 
 from fastapi import FastAPI, HTTPException
 
-from api import __version__, schemas, service
+from acp import feed as acp_feed
+from acp import router as acp_router
+from api import __version__, billing, receipts, schemas, service, well_known
 
 logger = logging.getLogger(__name__)
+
+# --- optional MCP (Streamable HTTP) ------------------------------------------
+# The official `mcp` SDK requires Python >=3.10; the core API stays importable on
+# 3.9. So the MCP app is imported lazily and mounted only when available. Its
+# session manager MUST run in THIS app's lifespan — Starlette does not run a
+# mounted sub-app's own lifespan (python-sdk #1367), so without this every /mcp
+# call would fail at runtime.
+try:
+    from mcp_server.server import http_app as _mcp_http_app, mcp as _mcp
+    _MCP_AVAILABLE = True
+except Exception as e:  # ImportError on <3.10 / missing dep — degrade gracefully
+    _mcp_http_app = None
+    _mcp = None
+    _MCP_AVAILABLE = False
+    logger.info("MCP server not mounted (%s)", e)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with contextlib.AsyncExitStack() as stack:
+        if _MCP_AVAILABLE:
+            await stack.enter_async_context(_mcp.session_manager.run())
+        yield
+
 
 app = FastAPI(
     title="Universal Mail Automation API",
@@ -26,8 +60,10 @@ app = FastAPI(
         "Multi-provider mail triage with provable restraint: a fail-closed "
         "protected-sender gate plus an independent audit receipt. The API never "
         "bypasses the gate and refuses to report success if a protected sender "
-        "was moved out of the inbox."
+        "was moved out of the inbox. Includes Stripe billing, an agent-facing "
+        "Agentic Commerce surface, and (where available) an MCP tool endpoint."
     ),
+    lifespan=lifespan,
 )
 
 
@@ -60,7 +96,7 @@ def triage(req: schemas.TriageRequest) -> dict:
 
 def _run(req: schemas.TriageRequest, *, dry_run: bool) -> dict:
     try:
-        return service.run_triage(
+        result = service.run_triage(
             provider=req.provider,
             query=req.query,
             limit=req.limit,
@@ -85,10 +121,32 @@ def _run(req: schemas.TriageRequest, *, dry_run: bool) -> dict:
             "the inbox; the run was rejected.",
         )
 
+    # Mint a run id and persist a signed receipt so the run is independently
+    # verifiable at GET /v1/audit/{run_id}. Best-effort: a ledger failure never
+    # downgrades a safe, gate-respecting run (the invariant already passed above).
+    run_id = "run_" + secrets.token_hex(12)
+    result["run_id"] = run_id
+    receipts.persist(run_id, result)
+    return result
 
-# --- Static web frontend ------------------------------------------------------
+
+# --- additional product surfaces ---------------------------------------------
+app.include_router(billing.router)
+app.include_router(receipts.router)
+app.include_router(acp_router.router)
+app.include_router(acp_feed.router)
+app.include_router(well_known.router)
+acp_router.register_acp_handlers(app)
+
+if _MCP_AVAILABLE:
+    # Streamable HTTP MCP endpoint; session manager started in lifespan above.
+    app.mount("/mcp", _mcp_http_app)
+
+
+# --- static web frontend ------------------------------------------------------
 # A zero-build dashboard served by the same app (same origin -> no CORS); it
-# calls the JSON API above. Mounted last so it never shadows /health or /v1.
+# calls the JSON API above. Mounted last so it never shadows /health, /v1, /acp,
+# or /mcp.
 from pathlib import Path  # noqa: E402
 
 from fastapi.responses import RedirectResponse  # noqa: E402

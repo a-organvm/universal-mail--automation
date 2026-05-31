@@ -15,6 +15,12 @@ gmail_labeler.log
 # audit/README.md documents the format and is tracked; the receipts are not.
 audit/*.jsonl
 
+# Durable app store (Stripe customer ids, api keys, receipt ledger) — never commit.
+data/
+*.db
+*.db-wal
+*.db-shm
+
 # Python
 __pycache__/
 *.py[cod]

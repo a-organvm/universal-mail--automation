@@ -1,0 +1,34 @@
+{
+  "schema_version": "v1",
+  "name": "Universal Mail Automation",
+  "description": "Email triage with a fail-closed protected-sender gate and an independent, signed audit receipt.",
+  "protocols": {
+    "mcp": {
+      "transport": "streamable-http",
+      "url": "https://mail.example.com/mcp",
+      "stdio": "python -m mcp_server",
+      "tools": [
+        "check_protected_sender",
+        "triage_preview",
+        "triage"
+      ]
+    },
+    "agentic_commerce": {
+      "spec_version": "2026-04-17",
+      "checkout_url": "https://mail.example.com/acp/checkout_sessions",
+      "product_feed": "https://mail.example.com/acp/feed.json"
+    }
+  },
+  "api": {
+    "base_url": "https://mail.example.com",
+    "openapi": "https://mail.example.com/openapi.json",
+    "pricing": "https://mail.example.com/v1/billing/plans",
+    "receipt_verification": "https://mail.example.com/v1/audit/{run_id}"
+  },
+  "oauth_scopes": [],
+  "safety": {
+    "protected_sender_gate": "fail-closed",
+    "audit_receipt": "independent, HMAC-signed, re-derivable",
+    "deletion": "archive/move only \u2014 never hard-deletes"
+  }
+}

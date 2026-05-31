@@ -115,6 +115,18 @@
     <div class="result" id="previewResult"></div>
   </section>
 
+  <section class="card">
+    <h2>Plans &amp; agent access</h2>
+    <p class="sub">The protected-sender gate and the signed audit receipt are on for
+      <strong>everyone</strong>, including Free — you pay for reach and retained receipts, never for safety.</p>
+    <div id="plans"><p class="meta">Loading plans…</p></div>
+    <div class="meta" style="margin-top:16px">
+      <strong>For AI agents:</strong> MCP tools at <code>/mcp</code> (or <code>python -m mcp_server</code>) ·
+      one-time credit packs via Agentic Commerce Protocol at <code>/acp/checkout_sessions</code> ·
+      discovery at <a href="/.well-known/agent.json">/.well-known/agent.json</a> and <a href="/llms.txt">/llms.txt</a>.
+    </div>
+  </section>
+
   <footer>
     <span class="pill">fail-closed</span> &nbsp;
     The audit receipt is your <strong>Compliance Evidence Pack</strong> — proof of what was protected and what moved.
@@ -210,6 +222,27 @@ function escapeHtml(s) {
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
   ));
 }
+
+// Render the live pricing catalog (no credentials needed).
+(async () => {
+  const out = $("plans");
+  try {
+    const r = await fetch("/v1/billing/plans");
+    if (!r.ok) throw new Error(r.status);
+    const data = await r.json();
+    const rows = (data.plans || []).map((p) => {
+      const cap = p.monthly_run_cap == null ? "unlimited" : `${p.monthly_run_cap.toLocaleString()}/mo`;
+      return `<tr>
+        <td><strong>${escapeHtml(p.name)}</strong></td>
+        <td>${escapeHtml(p.price_display)}</td>
+        <td>${escapeHtml(p.blurb)}<div class="meta">runs: ${cap} · providers: ${escapeHtml(p.providers)}</div></td>
+      </tr>`;
+    }).join("");
+    out.innerHTML = `<table><tr><th>Plan</th><th>Price</th><th>What you get</th></tr>${rows}</table>`;
+  } catch (e) {
+    out.innerHTML = `<p class="meta">Pricing unavailable right now.</p>`;
+  }
+})();
 </script>
 </body>
 </html>

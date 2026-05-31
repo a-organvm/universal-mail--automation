@@ -2,9 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install deps first for layer caching.
-COPY requirements.txt requirements-api.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-api.txt
+# Install deps first for layer caching. The deploy image is Python 3.11, so it
+# also installs requirements-mcp.txt (the `mcp` SDK needs >=3.10) — this is what
+# lights up the hosted /mcp endpoint. The core stays 3.9-importable without it.
+COPY requirements.txt requirements-api.txt requirements-mcp.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-api.txt \
+    -r requirements-mcp.txt
 
 COPY . .
 

@@ -67,3 +67,6 @@ class TriageResponse(BaseModel):
     receipt: str
     audit: AuditSummary
     processed: Any = None
+    # Set by the API: the id under which a signed receipt was persisted, fetchable
+    # at GET /v1/audit/{run_id}. Optional so the engine's own dict stays valid.
+    run_id: Optional[str] = None
