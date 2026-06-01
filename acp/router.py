@@ -287,42 +287,53 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
     account = store.get_account_by_api_key(ctx.api_key)
     if account is None:
         account = store.create_account(api_key=ctx.api_key, plan="free")  # allow-secret: var ref
-    store.fulfill_once(session_id, account["id"], total_runs)
+    fulfilled = store.fulfill_once(session_id, account["id"], total_runs)
 
-    order_id = "order_" + secrets.token_hex(12)
     base = str(request.base_url).rstrip("/")
-    order_receipt_body = {
-        "run_id": order_id,
-        "provider": "acp",
-        "dry_run": False,
-        "summary": {
-            "kind": "credit_pack_purchase",
-            "runs_credited": total_runs,
-            "amount": amount,
-            "currency": CURRENCY,
-            "payment_id": result.payment_id,
+    order = current.get("order")
+    messages = None
+    if fulfilled:
+        order_id = "order_" + secrets.token_hex(12)
+        order_receipt_body = {
+            "run_id": order_id,
+            "provider": "acp",
+            "dry_run": False,
+            "summary": {
+                "kind": "credit_pack_purchase",
+                "runs_credited": total_runs,
+                "amount": amount,
+                "currency": CURRENCY,
+                "payment_id": result.payment_id,
+                "checkout_session_id": session_id,
+            },
+            "receipt_line": f"ACP order {order_id}: {total_runs} triage-run credits "
+                            f"purchased for {amount} {CURRENCY} minor units.",
+        }
+        signature = receipts.sign(order_receipt_body)
+        store.save_receipt(
+            run_id=order_id, summary=order_receipt_body["summary"], provider="acp",
+            dry_run=False, receipt_line=order_receipt_body["receipt_line"],
+            signature=signature, account_id=account["id"],
+        )
+        order = {
+            "id": order_id,
             "checkout_session_id": session_id,
-        },
-        "receipt_line": f"ACP order {order_id}: {total_runs} triage-run credits "
-                        f"purchased for {amount} {CURRENCY} minor units.",
-    }
-    signature = receipts.sign(order_receipt_body)
-    store.save_receipt(
-        run_id=order_id, summary=order_receipt_body["summary"], provider="acp",
-        dry_run=False, receipt_line=order_receipt_body["receipt_line"],
-        signature=signature, account_id=account["id"],
-    )
+            "permalink_url": f"{base}/v1/audit/{order_id}",
+        }
+    elif order is None:
+        messages = [{
+            "type": "info",
+            "code": "already_fulfilled",
+            "content_type": "plain",
+            "text": "Credits were already fulfilled for this checkout session; "
+                    "no duplicate order receipt was minted.",
+        }]
 
-    order = {
-        "id": order_id,
-        "checkout_session_id": session_id,
-        "permalink_url": f"{base}/v1/audit/{order_id}",
-    }
     resp = _shape(request, session_id=session_id, status=models.STATUS_COMPLETED,
                   line_items=current["line_items"],
                   buyer=(body.buyer.model_dump() if body.buyer
                          else current.get("buyer")),
-                  order=order)
+                  order=order, messages=messages)
     _persist(session_id, resp, total_runs, account_id=account["id"])
     _complete_idempotency(ctx, resp)
     return JSONResponse(resp)

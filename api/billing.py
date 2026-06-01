@@ -129,7 +129,8 @@ def create_checkout(req: CheckoutRequest, request: Request) -> dict:
         or f"{base}/app/?billing=success&session_id={{CHECKOUT_SESSION_ID}}",
         "cancel_url": req.cancel_url or f"{base}/app/?billing=cancel",
         "client_reference_id": account_id,
-        "subscription_data": {"metadata": {"account_id": account_id}},
+        "metadata": {"account_id": account_id, "plan": plan.id},
+        "subscription_data": {"metadata": {"account_id": account_id, "plan": plan.id}},
         "allow_promotion_codes": True,
     }
     if req.email:
@@ -185,16 +186,21 @@ async def webhook(request: Request) -> dict:
 
     event_id = event["id"]
     event_type = event["type"]
+    store = get_store()
     # Idempotent on the event id: a Stripe redelivery is acknowledged but skipped.
-    if not get_store().mark_event_processed(event_id, event_type):
+    if store.is_event_processed(event_id):
         return {"received": True, "duplicate": True}
 
     if event_type in _HANDLED_EVENTS:
         try:
             _handle_event(event_type, event["data"]["object"])
-        except Exception as e:  # never 500 back to Stripe; log + 200 to stop retries
+        except Exception as e:
             logger.error("error handling %s (%s): %s", event_type, event_id, e,
                          exc_info=True)
+            raise HTTPException(
+                status_code=500, detail="webhook handler failed"
+            ) from e
+    store.mark_event_processed(event_id, event_type)
     return {"received": True}
 
 
@@ -220,11 +226,13 @@ def _handle_event(event_type: str, obj: dict) -> None:
         account_id = obj.get("client_reference_id")
         customer_id = obj.get("customer")
         subscription_id = obj.get("subscription")
+        plan_id = _checkout_plan_id(obj)
         resolved = _resolve_account(account_id, customer_id)
         store.set_subscription(
             account_id=resolved,
             customer_id=customer_id,
             subscription_id=subscription_id,
+            plan=plan_id,
             status="active",
         )
         return
@@ -274,6 +282,13 @@ def _first_price_id(subscription: dict) -> Optional[str]:
         return subscription["items"]["data"][0]["price"]["id"]
     except (KeyError, IndexError, TypeError):
         return None
+
+
+def _checkout_plan_id(session: dict) -> Optional[str]:
+    meta_plan = (session.get("metadata") or {}).get("plan")
+    if meta_plan and meta_plan in plans.PLANS:
+        return meta_plan
+    return plans.plan_id_for_price(_first_price_id(session))
 
 
 def _period_end(subscription: dict) -> Optional[int]:

@@ -85,6 +85,68 @@ def test_webhook_subscription_event_grants_and_dedups(monkeypatch):
     assert r2.json().get("duplicate") is True
 
 
+def test_webhook_handler_failure_not_marked_and_redelivery_grants(monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro_test")
+
+    store = get_store()
+    acct = store.create_account(plan="free")
+
+    event = {
+        "id": "evt_retry_1",
+        "type": "customer.subscription.updated",
+        "data": {"object": {
+            "id": "sub_retry",
+            "customer": "cus_retry",
+            "status": "active",
+            "metadata": {"account_id": acct["id"]},
+            "items": {"data": [{"price": {"id": "price_pro_test"}}]},
+        }},
+    }
+    monkeypatch.setattr(stripe.Webhook, "construct_event",
+                        lambda payload, sig, _whsec: event)
+
+    original = billing._handle_event
+    calls = {"n": 0}
+
+    def flaky_handle(event_type, obj):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient grant failure")
+        return original(event_type, obj)
+
+    monkeypatch.setattr(billing, "_handle_event", flaky_handle)
+
+    r = client.post("/v1/billing/webhook", content=b"{}",
+                    headers={"stripe-signature": "ok"})
+    assert r.status_code == 500
+    assert store.is_event_processed("evt_retry_1") is False
+    assert store.get_account(acct["id"])["plan"] == "free"
+
+    r2 = client.post("/v1/billing/webhook", content=b"{}",
+                     headers={"stripe-signature": "ok"})
+    assert r2.status_code == 200
+    assert store.is_event_processed("evt_retry_1") is True
+    assert store.get_account(acct["id"])["plan"] == "pro"
+
+
+def test_checkout_session_completed_sets_plan_from_metadata():
+    store = get_store()
+    acct = store.create_account(plan="free", status="active")
+
+    billing._handle_event("checkout.session.completed", {
+        "client_reference_id": acct["id"],
+        "customer": "cus_checkout",
+        "subscription": "sub_checkout",
+        "metadata": {"plan": "pro"},
+    })
+
+    got = store.get_account(acct["id"])
+    assert got["plan"] == "pro"
+    assert got["status"] == "active"
+    assert got["stripe_customer_id"] == "cus_checkout"
+
+
 def test_handle_subscription_canceled_drops_to_free():
     store = get_store()
     acct = store.create_account(plan="pro", status="active")

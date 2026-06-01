@@ -259,6 +259,12 @@ class Store:
             self._conn.commit()
             return cur.rowcount > 0
 
+    def is_event_processed(self, event_id: str) -> bool:
+        """Return True when a webhook event id has already completed handling."""
+        return self._fetch_one(
+            "SELECT event_id FROM webhook_events WHERE event_id = ?", (event_id,)
+        ) is not None
+
     # -- receipts -----------------------------------------------------------
     def save_receipt(
         self,

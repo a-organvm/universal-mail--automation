@@ -153,6 +153,27 @@ def test_complete_is_idempotent_no_double_credit():
     assert get_store().get_account_by_api_key("testkey")["run_credits"] == 100
 
 
+def test_complete_retry_after_fulfillment_does_not_mint_second_receipt():
+    payment.set_payment_client(_OKPay())
+    sid = client.post("/acp/checkout_sessions", json={"items": [{"id": "pack_100"}]},
+                      headers=_headers()).json()["id"]
+
+    store = get_store()
+    acct = store.create_account(api_key="testkey", plan="free")  # allow-secret: synthetic test key
+    assert store.fulfill_once(sid, acct["id"], 100) is True
+
+    r = client.post(f"/acp/checkout_sessions/{sid}/complete",
+                    json={"payment_data": {"token": "spt_ok"}}, headers=_headers())
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "completed"
+    assert "order" not in body
+    assert body["messages"][0]["code"] == "already_fulfilled"
+    assert store.get_account(acct["id"])["run_credits"] == 100
+    assert store.list_receipts(acct["id"]) == []
+
+
 def test_cancel_then_cannot_cancel_completed():
     # Cancel a fresh session.
     sid = client.post("/acp/checkout_sessions", json={"items": [{"id": "pack_100"}]},

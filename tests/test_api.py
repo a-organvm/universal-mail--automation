@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 
 from api import service
 from api.app import app
+from core.models import EmailMessage
+from providers.base import ListMessagesResult, ProviderCapabilities
 
 client = TestClient(app)
 
@@ -44,6 +46,39 @@ class _FakeProvider:
 
     def disconnect(self):
         pass
+
+
+class _DryRunProvider(_FakeProvider):
+    capabilities = ProviderCapabilities.TRUE_LABELS | ProviderCapabilities.ARCHIVE
+
+    def __init__(self):
+        self.messages = {
+            "n1": EmailMessage(
+                id="n1",
+                sender="newsletter@deals-promo.example",
+                subject="50% off sale unsubscribe",
+            )
+        }
+
+    def list_messages(self, query="", limit=100, page_token=None):
+        if page_token:
+            return ListMessagesResult(messages=[], next_page_token=None)
+        return ListMessagesResult(messages=list(self.messages.values())[:limit])
+
+    def batch_get_details(self, message_ids):
+        return {msg_id: self.messages[msg_id] for msg_id in message_ids}
+
+    def get_message_details(self, message_id):
+        return self.messages.get(message_id)
+
+    def apply_label(self, message_id, label):  # pragma: no cover - dry-run guard
+        raise AssertionError("dry-run preview must not apply labels")
+
+    def remove_label(self, message_id, label):  # pragma: no cover - dry-run guard
+        raise AssertionError("dry-run preview must not remove labels")
+
+    def archive(self, message_id):  # pragma: no cover - dry-run guard
+        raise AssertionError("dry-run preview must not archive")
 
 
 def test_triage_fail_closed_on_violation(monkeypatch):
@@ -97,6 +132,21 @@ def test_triage_clean_run_summary(monkeypatch):
     assert body["audit"]["archived"] == 1
     assert body["audit"]["violations"] == []
     assert "receipt" in body and body["receipt"]
+
+
+def test_triage_preview_reports_would_archive_for_archivable_message(monkeypatch):
+    import cli
+
+    monkeypatch.setattr(cli.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(service, "get_provider", lambda *a, **k: _DryRunProvider())
+
+    r = client.post("/v1/triage/preview", json={"provider": "fake", "limit": 1})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["dry_run"] is True
+    assert body["audit"]["archived"] > 0
+    assert "would leave inbox" in body["receipt"]
 
 
 def test_triage_provider_unavailable(monkeypatch):
