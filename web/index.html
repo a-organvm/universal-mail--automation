@@ -3,137 +3,292 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Universal Mail Automation — provable restraint</title>
+<title>Universal Mail Automation — clean your inbox, prove you never touched what matters</title>
+<meta name="description" content="Automated multi-provider inbox triage with a fail-closed protected-sender gate and a signed, re-derivable audit receipt. Gmail, Outlook, iCloud, IMAP." />
 <style>
   :root {
-    --green: #1b5e20; --green-soft: #e7f3e8; --ink: #1a2027; --muted: #5b6770;
-    --line: #e2e6ea; --bg: #f7f9fa; --red: #b3261e; --red-soft: #fbe9e7;
-    --amber: #8a6d00; --radius: 12px;
+    --green: #1b5e20; --green-2: #2e7d32; --green-soft: #e7f3e8; --ink: #14191f;
+    --muted: #5b6770; --line: #e3e7ea; --bg: #f6f8f9; --card: #fff;
+    --red: #b3261e; --red-soft: #fbe9e7; --amber: #8a6d00; --amber-soft:#fff7e6;
+    --radius: 14px; --shadow: 0 1px 3px rgba(16,24,32,.06), 0 8px 24px rgba(16,24,32,.04);
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  header { background: var(--green); color: #fff; padding: 28px 20px; }
-  .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px; }
-  header h1 { margin: 0 0 4px; font-size: 24px; letter-spacing: -0.01em; }
-  header p { margin: 0; opacity: .9; font-size: 15px; }
-  main { padding: 28px 0 64px; }
-  .card {
-    background: #fff; border: 1px solid var(--line); border-radius: var(--radius);
-    padding: 22px; margin: 18px 0; box-shadow: 0 1px 2px rgba(0,0,0,.03);
+  a { color: var(--green); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+  .narrow { max-width: 820px; }
+
+  /* nav */
+  nav {
+    position: sticky; top: 0; z-index: 50; background: rgba(255,255,255,.85);
+    backdrop-filter: saturate(150%) blur(10px); border-bottom: 1px solid var(--line);
   }
-  .card h2 { margin: 0 0 4px; font-size: 18px; }
-  .card .sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
-  label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin: 12px 0 4px; }
+  nav .bar { display: flex; align-items: center; gap: 18px; height: 60px; }
+  nav .brand { font-weight: 800; letter-spacing: -.02em; color: var(--ink); text-decoration: none; font-size: 16px; display:flex; align-items:center; gap:8px; }
+  nav .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
+  nav .links { display: flex; gap: 18px; margin-left: auto; align-items: center; }
+  nav .links a { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 600; }
+  nav .links a:hover { color: var(--ink); }
+  nav .links a.cta { background: var(--green); color: #fff; padding: 8px 14px; border-radius: 8px; }
+  @media (max-width: 720px){ nav .links a:not(.cta){ display:none; } }
+
+  /* hero */
+  .hero { background: linear-gradient(160deg, #103814 0%, #1b5e20 55%, #2e7d32 100%); color: #fff; padding: 64px 0 72px; }
+  .hero h1 { font-size: 40px; line-height: 1.1; letter-spacing: -.025em; margin: 0 0 16px; max-width: 18ch; }
+  .hero p.lede { font-size: 19px; opacity: .92; margin: 0 0 28px; max-width: 62ch; }
+  .hero .ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn { display:inline-block; border: 0; cursor: pointer; font-size: 15px; font-weight: 700;
+         padding: 13px 22px; border-radius: 10px; text-decoration: none; transition: filter .15s, transform .05s; }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: #fff; color: var(--green); }
+  .btn-ghost { background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.4); }
+  .btn-primary:hover, .btn-ghost:hover { filter: brightness(1.05); }
+  .hero .badges { margin-top: 26px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .hero .badge { font-size: 12.5px; font-weight: 600; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22);
+                 padding: 5px 11px; border-radius: 999px; }
+
+  main { padding: 0 0 24px; }
+  section.band { padding: 56px 0; }
+  section.band.alt { background: var(--card); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  h2.section { font-size: 27px; letter-spacing: -.02em; margin: 0 0 8px; }
+  p.section-sub { color: var(--muted); font-size: 16px; margin: 0 0 28px; max-width: 64ch; }
+  .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 12px; font-weight: 700; color: var(--green-2); margin: 0 0 8px; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 820px){ .grid3 { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card .ico { font-size: 26px; }
+  .card p { margin: 8px 0 0; color: var(--muted); font-size: 14.5px; }
+
+  label { display: block; font-size: 13px; font-weight: 700; color: var(--muted); margin: 14px 0 5px; }
   input, select {
-    width: 100%; padding: 10px 12px; border: 1px solid var(--line);
-    border-radius: 8px; font-size: 15px; background: #fff;
+    width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; font-size: 15px; background: #fff; color: var(--ink);
   }
+  input:focus, select:focus { outline: 2px solid var(--green-soft); border-color: var(--green-2); }
   .row { display: flex; gap: 12px; flex-wrap: wrap; }
-  .row > div { flex: 1; min-width: 140px; }
-  button {
-    margin-top: 16px; background: var(--green); color: #fff; border: 0;
-    padding: 11px 18px; border-radius: 8px; font-size: 15px; font-weight: 600;
-    cursor: pointer;
-  }
-  button:hover { filter: brightness(1.08); }
-  button:disabled { opacity: .6; cursor: default; }
+  .row > div { flex: 1; min-width: 150px; }
   .result { margin-top: 18px; }
-  .verdict {
-    display: flex; align-items: center; gap: 12px; padding: 16px;
-    border-radius: 10px; font-size: 16px; font-weight: 600;
-  }
+  .verdict { display:flex; align-items:center; gap:12px; padding:16px; border-radius:11px; font-size:16px; font-weight:700; }
   .verdict.protected { background: var(--green-soft); color: var(--green); }
-  .verdict.open { background: #eef2f5; color: var(--ink); }
+  .verdict.open { background:#eef2f5; color: var(--ink); }
   .verdict .icon { font-size: 24px; }
   .meta { margin-top: 10px; color: var(--muted); font-size: 14px; }
-  .receipt {
-    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-    background: #0f1720; color: #d6e2ea; padding: 14px 16px; border-radius: 10px;
-    white-space: pre-wrap; word-break: break-word; margin-top: 14px;
-  }
-  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
-  td, th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-  th { color: var(--muted); font-weight: 600; }
-  .held { color: var(--green); font-weight: 700; }
-  .violations-ok { color: var(--green); font-weight: 700; }
-  .violations-bad { color: var(--red); font-weight: 700; }
-  .notice { padding: 12px 14px; border-radius: 8px; font-size: 14px; }
-  .notice.warn { background: #fff7e6; color: var(--amber); border: 1px solid #f0e0b0; }
-  .notice.err { background: var(--red-soft); color: var(--red); border: 1px solid #f3cfc9; }
-  footer { color: var(--muted); font-size: 13px; text-align: center; padding: 24px 0 48px; }
-  footer a { color: var(--green); }
-  .pill { display:inline-block; background:#eef2f5; border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--muted); }
+  .receipt { font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; background:#0f1720; color:#d6e2ea;
+             padding:14px 16px; border-radius:11px; white-space:pre-wrap; word-break:break-word; margin-top:14px; }
+  table { width:100%; border-collapse:collapse; margin-top:14px; font-size:14px; }
+  td, th { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th { color: var(--muted); font-weight:700; }
+  .held, .violations-ok { color: var(--green); font-weight:800; }
+  .violations-bad { color: var(--red); font-weight:800; }
+  .notice { padding:12px 14px; border-radius:9px; font-size:14px; margin-top:14px; }
+  .notice.warn { background: var(--amber-soft); color: var(--amber); border:1px solid #f0e0b0; }
+  .notice.err { background: var(--red-soft); color: var(--red); border:1px solid #f3cfc9; }
+  .notice.ok { background: var(--green-soft); color: var(--green); border:1px solid #bfe0c2; }
+
+  /* pricing */
+  .pricing { display:grid; grid-template-columns: repeat(3,1fr); gap:18px; align-items:stretch; }
+  @media (max-width: 820px){ .pricing { grid-template-columns: 1fr; } }
+  .plan { background: var(--card); border:1px solid var(--line); border-radius: var(--radius); padding:24px; display:flex; flex-direction:column; box-shadow: var(--shadow); }
+  .plan.feature { border:2px solid var(--green-2); position:relative; }
+  .plan.feature::after { content:"Most popular"; position:absolute; top:-11px; left:24px; background:var(--green-2); color:#fff; font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; }
+  .plan h3 { margin:0; font-size:18px; }
+  .plan .price { font-size:30px; font-weight:800; letter-spacing:-.02em; margin:6px 0 2px; }
+  .plan .price small { font-size:14px; font-weight:600; color:var(--muted); }
+  .plan .blurb { color:var(--muted); font-size:14px; margin:6px 0 14px; min-height:40px; }
+  .plan ul { list-style:none; padding:0; margin:0 0 18px; font-size:14px; }
+  .plan li { padding:6px 0 6px 24px; position:relative; color:var(--ink); }
+  .plan li::before { content:"✓"; position:absolute; left:0; color:var(--green-2); font-weight:800; }
+  .plan .btn { margin-top:auto; text-align:center; }
+  .plan .btn-buy { background: var(--green); color:#fff; }
+  .plan .btn-free { background:#eef2f5; color:var(--ink); }
+
+  code { background:#eef2f5; padding:1px 6px; border-radius:5px; font-size:13px; }
+  .agentbox { display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
+  @media (max-width: 820px){ .agentbox { grid-template-columns: 1fr; } }
+  footer { color: var(--muted); font-size: 13.5px; padding: 36px 0 56px; border-top:1px solid var(--line); background:var(--card); }
+  footer .cols { display:flex; gap:32px; flex-wrap:wrap; justify-content:space-between; }
+  footer a { color: var(--muted); text-decoration:none; display:block; padding:3px 0; }
+  footer a:hover { color: var(--green); }
+  .pill { display:inline-block; background:var(--green-soft); color:var(--green); border-radius:999px; padding:3px 11px; font-size:12px; font-weight:700; }
 </style>
 </head>
 <body>
-<header>
+
+<nav>
+  <div class="wrap bar">
+    <a class="brand" href="#top"><span class="dot"></span> Universal Mail Automation</a>
+    <div class="links">
+      <a href="#how">How it works</a>
+      <a href="#demo">Try it</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#agents">For agents</a>
+      <a href="/docs">API</a>
+      <a class="cta" href="#demo">Get started</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
   <div class="wrap">
-    <h1>Universal Mail Automation</h1>
-    <p>Provable restraint — it cleans your inbox and proves it never touched what matters.</p>
+    <div class="eyebrow" style="color:#bfe7c4">Provable restraint</div>
+    <h1>Clean your inbox. Prove you never touched what matters.</h1>
+    <p class="lede">Automated triage across Gmail, Outlook, iCloud and IMAP — driven by one shared rules engine and Eisenhower priority tiers. A <strong>fail-closed protected-sender gate</strong> means legal, financial, government and account mail is <em>never</em> archived, and every run emits a <strong>signed, re-derivable audit receipt</strong>: proof of exactly what was held and what moved.</p>
+    <div class="ctas">
+      <a class="btn btn-primary" href="#demo">Try the live demo — no signup</a>
+      <a class="btn btn-ghost" href="#pricing">See pricing</a>
+    </div>
+    <div class="badges">
+      <span class="badge">🛡️ Fail-closed gate</span>
+      <span class="badge">🧾 Signed audit receipt</span>
+      <span class="badge">✉️ Gmail · Outlook · iCloud · IMAP</span>
+      <span class="badge">🤖 MCP + Agentic Commerce</span>
+    </div>
   </div>
 </header>
 
-<main class="wrap">
+<main>
 
-  <section class="card">
-    <h2>Will it ever touch this sender?</h2>
-    <p class="sub">The protected-sender gate decides on the real parsed domain. Legal, financial,
-      government, and account senders are <strong>never</strong> archived or moved. Try one — no mailbox needed.</p>
-    <label for="sender">Sender email</label>
-    <input id="sender" type="text" placeholder="clerk@courts.ca.gov" value="clerk@courts.ca.gov" />
-    <label for="subject">Subject (optional)</label>
-    <input id="subject" type="text" placeholder="Notice of hearing" />
-    <button id="checkBtn">Check sender</button>
-    <div class="result" id="checkResult"></div>
-  </section>
-
-  <section class="card">
-    <h2>Preview a triage</h2>
-    <p class="sub">A dry run: see exactly what <em>would</em> be archived and the audit receipt —
-      nothing in your mailbox is touched. Requires a connected mailbox on the server.</p>
-    <div class="row">
-      <div>
-        <label for="provider">Provider</label>
-        <select id="provider">
-          <option value="gmail">Gmail</option>
-          <option value="imap">IMAP</option>
-          <option value="mailapp">Apple Mail</option>
-          <option value="outlook">Outlook</option>
-        </select>
-      </div>
-      <div>
-        <label for="limit">Limit</label>
-        <input id="limit" type="number" min="1" max="1000" value="50" />
+  <!-- how it works -->
+  <section class="band" id="how">
+    <div class="wrap">
+      <p class="eyebrow">Why it's safe to automate</p>
+      <h2 class="section">Three guarantees, on for everyone</h2>
+      <p class="section-sub">The safety machinery is never a paid upgrade. Free accounts get the same gate and the same receipt — you pay for reach and retention, never for protection.</p>
+      <div class="grid3">
+        <div class="card">
+          <div class="ico">🛡️</div>
+          <h3>Protected-sender gate</h3>
+          <p>The gate decides on the real, parsed sending domain — not a fragile string match. Legal, financial, government and account senders are held in the inbox, always. The engine fails <em>closed</em>: a gate violation aborts the run.</p>
+        </div>
+        <div class="card">
+          <div class="ico">🧾</div>
+          <h3>Signed audit receipt</h3>
+          <p>Every run produces an independent, re-derivable receipt — your <strong>Compliance Evidence Pack</strong>. It records what was protected, archived, moved and kept, and refuses to report success if a protected sender ever left the inbox.</p>
+        </div>
+        <div class="card">
+          <div class="ico">✉️</div>
+          <h3>One engine, every mailbox</h3>
+          <p>Gmail, Outlook (Graph), iCloud and generic IMAP behind a single provider interface and one categorization taxonomy. Same rules, same tiers, same receipts — whichever inbox you point it at.</p>
+        </div>
       </div>
     </div>
-    <label for="query">Query</label>
-    <input id="query" type="text" value="has:nouserlabels" />
-    <button id="previewBtn">Preview (dry run)</button>
-    <div class="result" id="previewResult"></div>
   </section>
 
-  <section class="card">
-    <h2>Plans &amp; agent access</h2>
-    <p class="sub">The protected-sender gate and the signed audit receipt are on for
-      <strong>everyone</strong>, including Free — you pay for reach and retained receipts, never for safety.</p>
-    <div id="plans"><p class="meta">Loading plans…</p></div>
-    <div class="meta" style="margin-top:16px">
-      <strong>For AI agents:</strong> MCP tools at <code>/mcp</code> (or <code>python -m mcp_server</code>) ·
-      one-time credit packs via Agentic Commerce Protocol at <code>/acp/checkout_sessions</code> ·
-      discovery at <a href="/.well-known/agent.json">/.well-known/agent.json</a> and <a href="/llms.txt">/llms.txt</a>.
+  <!-- live demo -->
+  <section class="band alt" id="demo">
+    <div class="wrap narrow">
+      <p class="eyebrow">Live · no credentials</p>
+      <h2 class="section">Will it ever touch this sender?</h2>
+      <p class="section-sub">This calls the real gate on the real parsed domain. No mailbox, no signup — just proof of restraint.</p>
+      <div class="card">
+        <label for="sender">Sender email</label>
+        <input id="sender" type="text" placeholder="clerk@courts.ca.gov" value="clerk@courts.ca.gov" />
+        <label for="subject">Subject (optional)</label>
+        <input id="subject" type="text" placeholder="Notice of hearing" />
+        <button class="btn btn-primary" id="checkBtn" style="margin-top:16px;background:var(--green);color:#fff">Check sender</button>
+        <div class="result" id="checkResult"></div>
+      </div>
+
+      <h2 class="section" style="margin-top:40px">Preview a triage — nothing is touched</h2>
+      <p class="section-sub">A dry run shows exactly what <em>would</em> be archived plus the audit receipt. Requires a mailbox connected on the server.</p>
+      <div class="card">
+        <div class="row">
+          <div>
+            <label for="provider">Provider</label>
+            <select id="provider">
+              <option value="gmail">Gmail</option>
+              <option value="imap">IMAP</option>
+              <option value="mailapp">Apple Mail</option>
+              <option value="outlook">Outlook</option>
+            </select>
+          </div>
+          <div>
+            <label for="limit">Limit</label>
+            <input id="limit" type="number" min="1" max="1000" value="50" />
+          </div>
+        </div>
+        <label for="query">Query</label>
+        <input id="query" type="text" value="has:nouserlabels" />
+        <button class="btn btn-primary" id="previewBtn" style="margin-top:16px;background:var(--green);color:#fff">Preview (dry run)</button>
+        <div class="result" id="previewResult"></div>
+      </div>
     </div>
   </section>
 
-  <footer>
-    <span class="pill">fail-closed</span> &nbsp;
-    The audit receipt is your <strong>Compliance Evidence Pack</strong> — proof of what was protected and what moved.
-    <br /><br />
-    API docs at <a href="/docs">/docs</a> · health at <a href="/health">/health</a>
-  </footer>
+  <!-- pricing -->
+  <section class="band" id="pricing">
+    <div class="wrap">
+      <p class="eyebrow">Pricing</p>
+      <h2 class="section">Pay for reach, never for safety</h2>
+      <p class="section-sub">The gate and the signed receipt are included on every tier, including Free. Upgrade for more monthly runs, more providers, and retained receipts.</p>
+      <div id="plans" class="pricing"><p class="meta">Loading plans…</p></div>
+      <div class="card" style="margin-top:18px;max-width:480px">
+        <label for="email">Your email (for checkout &amp; receipts)</label>
+        <input id="email" type="email" placeholder="you@example.com" autocomplete="email" />
+        <div id="billingMsg"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- agents -->
+  <section class="band alt" id="agents">
+    <div class="wrap">
+      <p class="eyebrow">Built for humans and agents</p>
+      <h2 class="section">First-class agent surface</h2>
+      <p class="section-sub">The same engine an inbox uses is exposed to AI agents — discover it, call it, and buy credits programmatically.</p>
+      <div class="agentbox">
+        <div class="card">
+          <h3>🔌 MCP server</h3>
+          <p>Model Context Protocol tools over Streamable HTTP at <code>/mcp</code>, or run locally with <code>python -m mcp_server</code>. Dry-run by default; a gate violation surfaces as a tool error, never a silent success.</p>
+        </div>
+        <div class="card">
+          <h3>💳 Agentic Commerce (ACP)</h3>
+          <p>Agents buy one-time credit packs via the Agentic Commerce Protocol at <code>/acp/checkout_sessions</code> — idempotent and atomic. Subscriptions go through Stripe Checkout.</p>
+        </div>
+        <div class="card">
+          <h3>🧭 Discovery</h3>
+          <p>Self-describing at <a href="/.well-known/agent.json">/.well-known/agent.json</a>, <a href="/llms.txt">/llms.txt</a> and the MCP registry <a href="/server.json">server.json</a>. Point an agent at the host and it learns the rest.</p>
+        </div>
+        <div class="card">
+          <h3>🧾 Verifiable runs</h3>
+          <p>Every triage returns a <code>run_id</code>; fetch the signed receipt anytime at <code>GET /v1/audit/{run_id}</code>. Trust is checkable, not asserted.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
 </main>
+
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div style="max-width:42ch">
+        <div style="font-weight:800;color:var(--ink);margin-bottom:6px">Universal Mail Automation</div>
+        <span class="pill">fail-closed</span>
+        <p style="margin-top:10px">The audit receipt is your Compliance Evidence Pack — proof of what was protected and what moved. Safety is never a paid feature.</p>
+      </div>
+      <div>
+        <strong style="color:var(--ink)">Product</strong>
+        <a href="#how">How it works</a>
+        <a href="#demo">Live demo</a>
+        <a href="#pricing">Pricing</a>
+      </div>
+      <div>
+        <strong style="color:var(--ink)">Developers</strong>
+        <a href="/docs">API reference</a>
+        <a href="/mcp">MCP endpoint</a>
+        <a href="/llms.txt">llms.txt</a>
+        <a href="/health">Health</a>
+      </div>
+    </div>
+  </div>
+</footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -149,58 +304,48 @@ async function postJSON(path, body) {
   return { ok: r.ok, status: r.status, data };
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+// --- live sender check (no credentials) -------------------------------------
 $("checkBtn").addEventListener("click", async () => {
   const btn = $("checkBtn"), out = $("checkResult");
   const sender = $("sender").value.trim();
   if (!sender) { out.innerHTML = ''; return; }
   btn.disabled = true; out.innerHTML = '<p class="meta">Checking…</p>';
-  const { ok, status, data } = await postJSON("/v1/senders/check", {
-    sender, subject: $("subject").value,
-  });
+  const { ok, status, data } = await postJSON("/v1/senders/check", { sender, subject: $("subject").value });
   btn.disabled = false;
-  if (!ok || !data) {
-    out.innerHTML = `<div class="notice err">Request failed (${status}).</div>`;
-    return;
-  }
+  if (!ok || !data) { out.innerHTML = `<div class="notice err">Request failed (${status}).</div>`; return; }
   const cat = data.categorization || {};
   const tier = cat.tier != null ? `tier ${cat.tier}` : "";
   const label = cat.label ? `categorized as <strong>${escapeHtml(cat.label)}</strong>` : "";
   const extra = [label, tier].filter(Boolean).join(" · ");
   if (data.protected) {
-    out.innerHTML = `
-      <div class="verdict protected"><span class="icon">🛡️</span>
-        Protected — this sender is never archived or moved.</div>
-      ${extra ? `<div class="meta">${extra}</div>` : ""}`;
+    out.innerHTML = `<div class="verdict protected"><span class="icon">🛡️</span> Protected — this sender is never archived or moved.</div>${extra ? `<div class="meta">${extra}</div>` : ""}`;
   } else {
-    out.innerHTML = `
-      <div class="verdict open"><span class="icon">✉️</span>
-        Not protected — eligible for triage.</div>
-      ${extra ? `<div class="meta">${extra}</div>` : ""}`;
+    out.innerHTML = `<div class="verdict open"><span class="icon">✉️</span> Not protected — eligible for triage.</div>${extra ? `<div class="meta">${extra}</div>` : ""}`;
   }
 });
 
+// --- dry-run triage preview -------------------------------------------------
 $("previewBtn").addEventListener("click", async () => {
   const btn = $("previewBtn"), out = $("previewResult");
   btn.disabled = true; out.innerHTML = '<p class="meta">Previewing…</p>';
   const { ok, status, data } = await postJSON("/v1/triage/preview", {
-    provider: $("provider").value,
-    query: $("query").value,
-    limit: parseInt($("limit").value, 10) || 50,
+    provider: $("provider").value, query: $("query").value, limit: parseInt($("limit").value, 10) || 50,
   });
   btn.disabled = false;
   if (status === 503) {
-    out.innerHTML = `<div class="notice warn">No mailbox is connected on the server for this
-      provider yet. The dry run needs server-side credentials. (Single-tenant for now — connect-your-own-mailbox is the next milestone.)</div>`;
+    out.innerHTML = `<div class="notice warn">No mailbox is connected on the server for this provider yet. The dry run needs server-side credentials. (Single-tenant today — connect-your-own-mailbox is the next milestone.)</div>`;
     return;
   }
   if (status === 500 && data && /SAFETY GATE/.test(data.detail || "")) {
-    out.innerHTML = `<div class="notice err">${escapeHtml(data.detail)}</div>`;
-    return;
+    out.innerHTML = `<div class="notice err">${escapeHtml(data.detail)}</div>`; return;
   }
-  if (!ok || !data) {
-    out.innerHTML = `<div class="notice err">Request failed (${status}).</div>`;
-    return;
-  }
+  if (!ok || !data) { out.innerHTML = `<div class="notice err">Request failed (${status}).</div>`; return; }
   const a = data.audit || {};
   const viol = (a.violations || []).length;
   out.innerHTML = `
@@ -212,36 +357,81 @@ $("previewBtn").addEventListener("click", async () => {
       <tr><td>Moved</td><td>${a.moved ?? 0}</td></tr>
       <tr><td>Labeled</td><td>${a.labeled ?? 0}</td></tr>
       <tr><td>Kept</td><td>${a.kept ?? 0}</td></tr>
-      <tr><td>Gate violations</td>
-        <td class="${viol ? 'violations-bad' : 'violations-ok'}">${viol ? viol + ' ⚠️' : '0 — gate held'}</td></tr>
+      <tr><td>Gate violations</td><td class="${viol ? 'violations-bad' : 'violations-ok'}">${viol ? viol + ' ⚠️' : '0 — gate held'}</td></tr>
     </table>`;
 });
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => (
-    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-  ));
+// --- pricing + checkout -----------------------------------------------------
+const PURCHASABLE = { pro: true, business: true };
+
+async function startCheckout(planId, btn) {
+  const msg = $("billingMsg");
+  const email = ($("email").value || "").trim();
+  msg.innerHTML = "";
+  if (!email || !/.+@.+\..+/.test(email)) {
+    msg.innerHTML = `<div class="notice warn">Enter your email above first.</div>`;
+    $("email").focus(); return;
+  }
+  const prev = btn.textContent; btn.disabled = true; btn.textContent = "Redirecting…";
+  const { ok, status, data } = await postJSON("/v1/billing/checkout", { plan: planId, email });
+  if (ok && data && data.url) { window.location.href = data.url; return; }
+  btn.disabled = false; btn.textContent = prev;
+  if (status === 503) {
+    msg.innerHTML = `<div class="notice warn">Billing isn't live on this server yet (Stripe keys not configured). The plan, gate and receipts all work — only the card step is pending setup.</div>`;
+  } else {
+    msg.innerHTML = `<div class="notice err">Couldn't start checkout (${status}). Try again shortly.</div>`;
+  }
 }
 
-// Render the live pricing catalog (no credentials needed).
 (async () => {
   const out = $("plans");
   try {
     const r = await fetch("/v1/billing/plans");
     if (!r.ok) throw new Error(r.status);
     const data = await r.json();
-    const rows = (data.plans || []).map((p) => {
-      const cap = p.monthly_run_cap == null ? "unlimited" : `${p.monthly_run_cap.toLocaleString()}/mo`;
-      return `<tr>
-        <td><strong>${escapeHtml(p.name)}</strong></td>
-        <td>${escapeHtml(p.price_display)}</td>
-        <td>${escapeHtml(p.blurb)}<div class="meta">runs: ${cap} · providers: ${escapeHtml(p.providers)}</div></td>
-      </tr>`;
-    }).join("");
-    out.innerHTML = `<table><tr><th>Plan</th><th>Price</th><th>What you get</th></tr>${rows}</table>`;
+    const plans = data.plans || [];
+    out.innerHTML = "";
+    plans.forEach((p) => {
+      const cap = p.monthly_run_cap == null ? "Unlimited runs" : `${Number(p.monthly_run_cap).toLocaleString()} runs / mo`;
+      const feature = p.id === "pro" ? " feature" : "";
+      const card = document.createElement("div");
+      card.className = "plan" + feature;
+      const buyable = PURCHASABLE[p.id];
+      card.innerHTML = `
+        <h3>${escapeHtml(p.name || p.id)}</h3>
+        <div class="price">${escapeHtml(p.price_display || "")}</div>
+        <div class="blurb">${escapeHtml(p.blurb || "")}</div>
+        <ul>
+          <li>${escapeHtml(cap)}</li>
+          <li>Providers: ${escapeHtml(p.providers || "—")}</li>
+          <li>Protected-sender gate &amp; signed receipts</li>
+        </ul>`;
+      const btn = document.createElement("button");
+      btn.className = "btn " + (buyable ? "btn-buy" : "btn-free");
+      btn.textContent = buyable ? `Get ${escapeHtml(p.name || p.id)}` : "Start free";
+      if (buyable) {
+        btn.addEventListener("click", () => startCheckout(p.id, btn));
+      } else {
+        btn.addEventListener("click", () => { $("demo").scrollIntoView(); });
+      }
+      card.appendChild(btn);
+      out.appendChild(card);
+    });
+    if (!plans.length) out.innerHTML = `<p class="meta">No plans available right now.</p>`;
   } catch (e) {
     out.innerHTML = `<p class="meta">Pricing unavailable right now.</p>`;
   }
+})();
+
+// Surface a billing return state (Stripe redirects back to /app/?billing=success|cancel).
+(function () {
+  const q = new URLSearchParams(location.search);
+  const b = q.get("billing");
+  if (!b) return;
+  const msg = $("billingMsg");
+  if (msg && b === "success") msg.innerHTML = `<div class="notice ok">✓ Subscription active — welcome aboard. Your receipts are now retained.</div>`;
+  if (msg && b === "cancel") msg.innerHTML = `<div class="notice warn">Checkout canceled — no charge made.</div>`;
+  if (b) document.getElementById("pricing").scrollIntoView();
 })();
 </script>
 </body>
