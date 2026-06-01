@@ -46,7 +46,7 @@ This repo participates in the **ORGAN-III (Commerce)** swarm.
 - *No active event subscriptions*
 
 ### Production Responsibilities
-- *No production responsibilities*
+- **Produce** `artifact` for unspecified
 
 ### External Dependencies
 - *No external dependencies*
@@ -55,5 +55,5 @@ This repo participates in the **ORGAN-III (Commerce)** swarm.
 - Adhere to unidirectional flow: I→II→III
 - Never commit secrets or credentials
 
-*Last synced: 2026-03-08T20:11:34Z*
+*Last synced: 2026-06-01T13:17:56Z*
 <!-- ORGANVM:AUTO:END -->
