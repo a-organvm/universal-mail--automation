@@ -2,7 +2,7 @@
 
 This repository includes a Cloudflare Worker share surface for quick partner review:
 
-- Live URL: `https://universal-mail-automation-demo.ivixivi.workers.dev`
+- Live URL: `https://uma.4444j99.dev`
 - Worker entrypoint: `cloudflare/worker.mjs`
 - Worker config: `wrangler.toml`
 - Static frontend assets: `web/`

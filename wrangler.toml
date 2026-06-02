@@ -1,6 +1,10 @@
-name = "universal-mail-automation-demo"
+name = "uma"
 main = "cloudflare/worker.mjs"
 compatibility_date = "2026-06-01"
+
+routes = [
+  { pattern = "uma.4444j99.dev", custom_domain = true }
+]
 
 [assets]
 directory = "./web"

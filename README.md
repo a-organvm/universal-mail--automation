@@ -86,7 +86,7 @@ The system is designed as a daily automation. A macOS `launchd` job runs every m
 
 A public Cloudflare Worker demo is available for quick partner review:
 
-- Live share URL: <https://universal-mail-automation-demo.ivixivi.workers.dev>
+- Live share URL: <https://uma.4444j99.dev>
 - Deployment note: [docs/cloudflare-share-demo.md](docs/cloudflare-share-demo.md)
 
 This share surface serves the dashboard and a minimal same-origin API. It is not the canonical product backend; the Python application remains authoritative for real provider operations.
