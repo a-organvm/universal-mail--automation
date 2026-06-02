@@ -35,7 +35,7 @@
 ## Critical Context
 
 - The live share URL is:
-  - `https://universal-mail-automation-demo.ivixivi.workers.dev`
+  - `https://uma.4444j99.dev`
 - The worker serves the frontend and a minimal API from the same origin.
 - The underlying Python backend in the repo is still the canonical app for the full product.
 - Any claim that the repo is "fully shipped" should be separated from the share deployment. The share backend is a delivery layer for the frontend, not a rewrite of the product backend.

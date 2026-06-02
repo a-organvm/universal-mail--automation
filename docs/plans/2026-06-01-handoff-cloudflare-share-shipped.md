@@ -53,7 +53,7 @@
 
 ## Critical Context
 
-- Live share URL: `https://universal-mail-automation-demo.ivixivi.workers.dev`
+- Live share URL: `https://uma.4444j99.dev`
 - The share backend is now source-durable on `main` via PR #8.
 - `docs/cloudflare-share-demo.md` documents the share URL, deployment command, and safety boundary.
 - `wrangler.toml` and `cloudflare/worker.mjs` are committed on `main`.
