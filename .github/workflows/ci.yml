@@ -31,14 +31,36 @@ jobs:
           pip install pytest pytest-cov ruff mypy
 
       - name: Lint with ruff
-        continue-on-error: true
         run: |
-          ruff check --output-format=github .
+          set +e
+          ruff check . | tee ruff.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "## Ruff advisory findings"
+              echo
+              echo '```text'
+              cat ruff.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Ruff advisory check found issues; pytest remains the hard gate."
+          fi
 
       - name: Type check with mypy
-        continue-on-error: true
         run: |
-          mypy . --ignore-missing-imports
+          set +e
+          mypy . --ignore-missing-imports | tee mypy.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "## Mypy advisory findings"
+              echo
+              echo '```text'
+              cat mypy.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Mypy advisory check found issues; pytest remains the hard gate."
+          fi
 
       - name: Test with pytest
         run: |
