@@ -1,0 +1,14 @@
+# Universal Mail Automation
+
+> Multi-provider email triage with provable restraint: a fail-closed protected-sender gate (never archives government, financial, legal, or platform mail) plus an independent, signed audit receipt that refuses to report success if a protected sender left the inbox.
+
+## For agents
+- MCP tools (Streamable HTTP): https://mail.example.com/mcp ; stdio: python -m mcp_server
+- Agentic Commerce checkout: https://mail.example.com/acp/checkout_sessions
+- Product feed: https://mail.example.com/acp/feed.json
+- Receipt verification: https://mail.example.com/v1/audit/{run_id}
+
+## API
+- Pricing: https://mail.example.com/v1/billing/plans
+- Protected-sender check (no mailbox): https://mail.example.com/v1/senders/check
+- Triage preview (dry-run): https://mail.example.com/v1/triage/preview

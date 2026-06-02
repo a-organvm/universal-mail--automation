@@ -1,0 +1,47 @@
+{
+  "version": "2026-04-17",
+  "seller_name": "Universal Mail Automation",
+  "checkout_url": "https://mail.example.com/acp/checkout_sessions",
+  "products": [
+    {
+      "item_id": "pack_100",
+      "title": "100 verified-safe triage runs",
+      "description": "100 triage runs with a fail-closed protected-sender gate and a signed, independently verifiable audit receipt per run.",
+      "url": "https://mail.example.com/app/",
+      "brand": "Universal Mail Automation",
+      "image_url": "https://mail.example.com/app/",
+      "price": 100,
+      "currency": "USD",
+      "availability": "in_stock",
+      "is_digital": true,
+      "is_eligible_search": true,
+      "is_eligible_checkout": true,
+      "seller_name": "Universal Mail Automation",
+      "seller_url": "https://mail.example.com",
+      "target_countries": [
+        "US"
+      ],
+      "store_country": "US"
+    },
+    {
+      "item_id": "pack_1000",
+      "title": "1,000 verified-safe triage runs",
+      "description": "1000 triage runs with a fail-closed protected-sender gate and a signed, independently verifiable audit receipt per run.",
+      "url": "https://mail.example.com/app/",
+      "brand": "Universal Mail Automation",
+      "image_url": "https://mail.example.com/app/",
+      "price": 900,
+      "currency": "USD",
+      "availability": "in_stock",
+      "is_digital": true,
+      "is_eligible_search": true,
+      "is_eligible_checkout": true,
+      "seller_name": "Universal Mail Automation",
+      "seller_url": "https://mail.example.com",
+      "target_countries": [
+        "US"
+      ],
+      "store_country": "US"
+    }
+  ]
+}

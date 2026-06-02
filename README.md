@@ -20,6 +20,7 @@
 
 - [The Problem](#the-problem)
 - [Product Overview](#product-overview)
+- [Cloudflare Share Demo](#cloudflare-share-demo)
 - [Technical Architecture](#technical-architecture)
   - [System Diagram](#system-diagram)
   - [Module Structure](#module-structure)
@@ -78,6 +79,17 @@ Universal Mail Automation is a Python-based email triage system that applies a u
 3. **Time-Based Escalation** — Emails that remain unprocessed age into higher priority tiers. A Tier 4 (Reference) email that sits for 72+ hours automatically escalates to Tier 1 (Critical), ensuring nothing falls through the cracks.
 
 The system is designed as a daily automation. A macOS `launchd` job runs every morning at 9:00 AM, processing all three providers sequentially, with crash recovery ensuring interrupted runs can resume from the last successfully processed page.
+
+---
+
+## Cloudflare Share Demo
+
+A public Cloudflare Worker demo is available for quick partner review:
+
+- Live share URL: <https://universal-mail-automation-demo.ivixivi.workers.dev>
+- Deployment note: [docs/cloudflare-share-demo.md](docs/cloudflare-share-demo.md)
+
+This share surface serves the dashboard and a minimal same-origin API. It is not the canonical product backend; the Python application remains authoritative for real provider operations.
 
 ---
 

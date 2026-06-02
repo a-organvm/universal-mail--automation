@@ -1,0 +1,7 @@
+name = "universal-mail-automation-demo"
+main = "cloudflare/worker.mjs"
+compatibility_date = "2026-06-01"
+
+[assets]
+directory = "./web"
+binding = "ASSETS"

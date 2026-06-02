@@ -14,6 +14,26 @@ from core.models import EmailMessage, LabelAction, ProcessingResult
 from core.state import StateManager
 from core.rules import VIP_SENDERS
 
+from api import store as _store_mod
+
+
+@pytest.fixture(autouse=True)
+def isolated_commerce_store(tmp_path, monkeypatch):
+    """Give every test a fresh, throwaway SQLite store (never the real data/app.db)
+    and reset injected singletons (store + ACP payment client) so commerce tests
+    don't bleed state into each other."""
+    monkeypatch.setenv("MAIL_DB_PATH", str(tmp_path / "test_app.db"))
+    _store_mod.set_store(None)
+    try:
+        from acp import payment as _payment_mod
+        _payment_mod.set_payment_client(None)
+    except Exception:
+        _payment_mod = None
+    yield
+    _store_mod.set_store(None)
+    if _payment_mod is not None:
+        _payment_mod.set_payment_client(None)
+
 
 @pytest.fixture
 def sample_email():

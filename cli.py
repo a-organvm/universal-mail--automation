@@ -52,6 +52,43 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _record_dry_run_intent(
+    provider: EmailProvider,
+    actions: list[LabelAction],
+    audit: "AuditLog",
+) -> None:
+    """Record the disposition that would be attempted in a dry-run preview.
+
+    Live receipts stay post-hoc witnesses recorded by provider.apply_actions().
+    In dry-run, no provider operation executes, so the preview records the
+    intended, gate-respecting disposition and the audit entry is tagged
+    ``dry_run=True``.
+    """
+    is_folder = bool(provider.capabilities & ProviderCapabilities.FOLDERS)
+    label_is_move = bool(getattr(provider, "LABEL_IS_MOVE", False))
+
+    for action in actions:
+        protected = is_protected_sender(action.sender)
+        labels_added = [] if protected and label_is_move else list(action.add_labels)
+        would_leave_inbox = bool(action.archive) or any(
+            label.upper() in ("INBOX", "\\INBOX") for label in action.remove_labels
+        )
+        would_label_move = bool(labels_added) and label_is_move
+
+        audit.record(
+            message_id=action.message_id,
+            sender=action.sender,
+            protected=protected,
+            archived=(not protected and not is_folder and would_leave_inbox),
+            moved=(
+                not protected
+                and is_folder
+                and (would_leave_inbox or would_label_move or bool(action.target_folder))
+            ),
+            labels_added=labels_added,
+        )
+
+
 def get_provider(
     provider_name: str,
     host: Optional[str] = None,
@@ -249,6 +286,8 @@ def run_labeler(
                 result.error_count += batch_result.error_count
                 result.errors.extend(batch_result.errors)
             else:
+                if actions and dry_run and audit is not None:
+                    _record_dry_run_intent(provider, actions, audit)
                 result.success_count += len(actions)
 
             processed_this_run += len(actions)

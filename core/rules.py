@@ -563,6 +563,7 @@ EXAMPLE_PROTECTED_SENDERS: List[str] = [
     "apple.com", "appleid.com",  # appleid.com covers privaterelay.appleid.com + e.appleid.com
     "google.com", "accounts.google.com", "anthropic.com",
     "1password.com", "meta.com", "facebookmail.com",  # account-takeover alert backstops
+    "chase.com",                                      # demo financial-alert backstop
     # --- SYNTHETIC placeholders (replace with your real entries in the local file) ---
     "example-lawfirm.com",                           # your attorney's domain
     "example-bank.com", "alerts.example-bank.com",   # your bank (account/alerts only)

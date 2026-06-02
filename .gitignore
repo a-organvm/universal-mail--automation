@@ -15,6 +15,12 @@ gmail_labeler.log
 # audit/README.md documents the format and is tracked; the receipts are not.
 audit/*.jsonl
 
+# Durable app store (Stripe customer ids, api keys, receipt ledger) — never commit.
+data/
+*.db
+*.db-wal
+*.db-shm
+
 # Python
 __pycache__/
 *.py[cod]
@@ -22,3 +28,10 @@ __pycache__/
 env/
 venv/
 .DS_Store
+
+# Local Claude Code settings (personal permission rules) — never commit.
+.claude/settings.local.json
+
+# Local agent/session state — contains transcripts, prompts, and private context.
+.claude/sessions/
+.serena/

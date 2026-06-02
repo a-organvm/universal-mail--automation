@@ -7,10 +7,10 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/4jp/Workspace/universal-mail--automation/run_automation.sh</string>
+        <string>/Users/4jp/Code/organvm/universal-mail--automation/run_automation.sh</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/4jp/Workspace/universal-mail--automation</string>
+    <string>/Users/4jp/Code/organvm/universal-mail--automation</string>
     <key>StandardOutPath</key>
     <string>/Users/4jp/System/Logs/mail_automation/launchd.stdout.log</string>
     <key>StandardErrorPath</key>

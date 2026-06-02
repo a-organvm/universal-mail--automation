@@ -290,8 +290,8 @@ class MailAppProvider(EmailProvider):
         """Move message to Archive mailbox."""
         return self.apply_label(message_id, "Archive")
 
-    def star(self, message_id: str) -> bool:
-        """Flag a message."""
+    def star(self, message_id: str, due_date: Optional[datetime] = None) -> bool:
+        """Flag a message. due_date is ignored by Mail.app."""
         script = f'''
         tell application "Mail"
             set targetMsg to first message whose id is {message_id}

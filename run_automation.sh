@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-REPO_DIR="/Users/4jp/Workspace/universal-mail--automation"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
 VENV_DIR="$REPO_DIR/.venv"
