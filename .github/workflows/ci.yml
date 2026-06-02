@@ -99,9 +99,10 @@ jobs:
 
       - name: Deploy Worker
         if: steps.deploy_credentials.outputs.available == 'true'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: "4"
           command: deploy
 
       - name: Smoke test live share demo
