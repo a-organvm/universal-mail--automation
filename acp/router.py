@@ -97,6 +97,24 @@ def _request_hash(raw: bytes) -> str:
     return hashlib.sha256(raw or b"").hexdigest()
 
 
+def _key_hash(api_key: str) -> str:  # allow-secret: parameter name, not a value
+    """Stable hash of the caller's bearer key. Bound to a session at creation so
+    only the creator can update/cancel/complete it, and so completion credits the
+    CREATOR's account — never a different bearer that happens to call /complete
+    (review U010). The raw key is never stored on the session."""
+    return hashlib.sha256((api_key or "").encode("utf-8")).hexdigest()
+
+
+def _require_owner(ctx: GateContext, row: dict) -> None:
+    """Only the bearer that CREATED a session may act on it. Sessions created
+    before binding existed (no creator_key_hash) are not gated, for back-compat."""
+    expected = row["data"].get("creator_key_hash")
+    if expected is not None and _key_hash(ctx.api_key) != expected:
+        raise ACPError(403, "session_owner_mismatch",
+                       "this checkout session belongs to a different account",
+                       "Authorization")
+
+
 def _begin_idempotency(ctx: GateContext, raw: bytes, scope: str) -> Optional[dict]:
     """Claim the idempotency key. Returns the stored response on replay (caller
     returns it with Idempotent-Replayed: true), None to proceed. Raises ACPError
@@ -147,11 +165,13 @@ def _shape(
 
 
 def _persist(session_id: str, response: dict, total_runs: int,
-             account_id: Optional[str] = None) -> None:
+             account_id: Optional[str] = None,
+             creator_key_hash: Optional[str] = None) -> None:
     get_store().save_session(
         session_id=session_id, status=response["status"], currency=CURRENCY,
         account_id=account_id,
-        data={"response": response, "total_runs": total_runs},
+        data={"response": response, "total_runs": total_runs,
+              "creator_key_hash": creator_key_hash},
     )
 
 
@@ -185,7 +205,7 @@ async def create_session(body: models.CheckoutCreate, request: Request):
                   line_items=line_items,
                   buyer=body.buyer.model_dump() if body.buyer else None,
                   messages=messages)
-    _persist(session_id, resp, total_runs)
+    _persist(session_id, resp, total_runs, creator_key_hash=_key_hash(ctx.api_key))
     _complete_idempotency(ctx, resp)
     return JSONResponse(resp)
 
@@ -207,6 +227,7 @@ async def update_session(session_id: str, body: models.CheckoutUpdate,
         return JSONResponse(replay, headers={"Idempotent-Replayed": "true"})
 
     row = _load(session_id)
+    _require_owner(ctx, row)
     current = row["data"]["response"]
     if current["status"] in (models.STATUS_COMPLETED, models.STATUS_CANCELED,
                              models.STATUS_EXPIRED):
@@ -227,7 +248,8 @@ async def update_session(session_id: str, body: models.CheckoutUpdate,
     buyer = body.buyer.model_dump() if body.buyer else current.get("buyer")
     resp = _shape(request, session_id=session_id, status=status,
                   line_items=line_items, buyer=buyer)
-    _persist(session_id, resp, total_runs)
+    _persist(session_id, resp, total_runs,
+             creator_key_hash=row["data"].get("creator_key_hash"))
     _complete_idempotency(ctx, resp)
     return JSONResponse(resp)
 
@@ -242,8 +264,10 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
         return JSONResponse(replay, headers={"Idempotent-Replayed": "true"})
 
     row = _load(session_id)
+    _require_owner(ctx, row)
     current = row["data"]["response"]
     total_runs = row["data"]["total_runs"]
+    creator_key_hash = row["data"].get("creator_key_hash")
 
     if current["status"] == models.STATUS_COMPLETED:
         # Already fulfilled — return the completed session idempotently.
@@ -275,7 +299,7 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
                       buyer=(body.buyer.model_dump() if body.buyer
                              else current.get("buyer")),
                       messages=messages)
-        _persist(session_id, resp, total_runs)
+        _persist(session_id, resp, total_runs, creator_key_hash=creator_key_hash)
         _complete_idempotency(ctx, resp)
         return JSONResponse(resp, status_code=402)
 
@@ -334,7 +358,8 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
                   buyer=(body.buyer.model_dump() if body.buyer
                          else current.get("buyer")),
                   order=order, messages=messages)
-    _persist(session_id, resp, total_runs, account_id=account["id"])
+    _persist(session_id, resp, total_runs, account_id=account["id"],
+             creator_key_hash=creator_key_hash)
     _complete_idempotency(ctx, resp)
     return JSONResponse(resp)
 
@@ -348,12 +373,14 @@ async def cancel_session(session_id: str, request: Request):
         return JSONResponse(replay, headers={"Idempotent-Replayed": "true"})
 
     row = _load(session_id)
+    _require_owner(ctx, row)
     current = row["data"]["response"]
     if current["status"] == models.STATUS_COMPLETED:
         raise ACPError(400, "invalid_state", "cannot cancel a completed session",
                        "status")
     resp = _shape(request, session_id=session_id, status=models.STATUS_CANCELED,
                   line_items=current["line_items"], buyer=current.get("buyer"))
-    _persist(session_id, resp, row["data"]["total_runs"])
+    _persist(session_id, resp, row["data"]["total_runs"],
+             creator_key_hash=row["data"].get("creator_key_hash"))
     _complete_idempotency(ctx, resp)
     return JSONResponse(resp)
