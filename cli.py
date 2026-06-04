@@ -947,6 +947,66 @@ def cmd_escalate(args: argparse.Namespace) -> int:
     return 0 if result.error_count == 0 else 1
 
 
+def cmd_triage(args: argparse.Namespace) -> int:
+    """Handle the 'triage' subcommand.
+
+    The end-to-end pipeline the project is built around: pull a batch of
+    messages, run content & context research on each, score and sort them by
+    priority, and (optionally) draft suggested replies in the user's own voice.
+    """
+    from pathlib import Path
+    from core.triage import triage_messages, render_triage
+    from core.voice import load_voice_profile
+
+    config = load_config()
+    apply_vip_senders_from_config(config)
+
+    provider = get_provider(
+        args.provider,
+        host=args.host,
+        user=args.user,
+        password=args.password,  # allow-secret
+        account=args.account,
+        use_gmail_extensions=args.gmail_extensions,
+    )
+
+    voice = None
+    if args.draft:
+        voice = load_voice_profile(
+            path=Path(args.voice_file).expanduser() if args.voice_file else None,
+            samples_path=Path(args.samples_file).expanduser() if args.samples_file else None,
+            name=args.name or "",
+        )
+
+    logger.info(f"Triaging mailbox (provider: {provider.name})")
+
+    with provider:
+        list_result = provider.list_messages(query=args.query, limit=args.limit)
+        if not list_result.messages:
+            print("No messages found.")
+            return 0
+
+        msg_ids = [m.id for m in list_result.messages]
+        if hasattr(provider, "batch_get_details"):
+            details = provider.batch_get_details(msg_ids)
+        else:
+            details = {m.id: provider.get_message_details(m.id) for m in list_result.messages}
+
+        messages = [m for m in details.values() if m]
+
+    # Bodies are sourced from whatever the provider populated (snippet/body);
+    # research degrades gracefully to subject-only when none is available.
+    items = triage_messages(messages, voice=voice, draft=args.draft)
+
+    if args.top and args.top > 0:
+        items = items[: args.top]
+        for i, item in enumerate(items, start=1):
+            item.rank = i
+
+    print(render_triage(items, fmt=args.format))
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -961,6 +1021,7 @@ Examples:
   %(prog)s label --provider outlook --dry-run
   %(prog)s report --provider gmail
   %(prog)s health --provider gmail
+  %(prog)s triage --provider gmail --top 20 --draft --name "Anthony"
         """,
     )
 
@@ -1188,6 +1249,56 @@ Examples:
         help="Output format (default: table)",
     )
     vip_parser.set_defaults(func=cmd_vip)
+
+    # Triage command — research + prioritization sort + voice-matched drafts
+    triage_parser = subparsers.add_parser(
+        "triage",
+        parents=[provider_group],
+        help="Research, prioritize and (optionally) draft replies for the mailbox",
+    )
+    triage_parser.add_argument(
+        "--query", "-q",
+        default="",
+        help="Query to filter messages",
+    )
+    triage_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=200,
+        help="Maximum messages to triage (default: 200)",
+    )
+    triage_parser.add_argument(
+        "--top", "-t",
+        type=int,
+        default=0,
+        help="Show only the top N highest-priority items (default: all)",
+    )
+    triage_parser.add_argument(
+        "--format", "-f",
+        choices=["text", "markdown", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
+    triage_parser.add_argument(
+        "--draft",
+        action="store_true",
+        help="Generate suggested replies in the user's voice for items needing a response",
+    )
+    triage_parser.add_argument(
+        "--voice-file",
+        help="Path to a saved voice profile JSON "
+             "(default: ~/.config/mail_automation/voice.json)",
+    )
+    triage_parser.add_argument(
+        "--samples-file",
+        help="Path to a corpus of the user's sent messages to learn voice from "
+             "(default: ~/.config/mail_automation/sent_samples.txt)",
+    )
+    triage_parser.add_argument(
+        "--name",
+        help="User's name for the draft signature",
+    )
+    triage_parser.set_defaults(func=cmd_triage)
 
     args = parser.parse_args()
 

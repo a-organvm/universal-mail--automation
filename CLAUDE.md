@@ -77,6 +77,25 @@ python3 cli.py escalate --provider outlook --dry-run
 python3 cli.py escalate --provider gmail --limit 500
 ```
 
+### Triage Command (research + prioritization + voice-matched drafts)
+End-to-end pipeline: research each item's content/context, score and sort the
+mailbox by priority, and optionally draft replies in the user's own voice.
+```bash
+# Priority-sorted triage of the mailbox (research + scoring)
+python3 cli.py triage --provider gmail --top 20
+
+# Markdown / JSON output
+python3 cli.py triage --provider outlook --format markdown
+python3 cli.py triage --provider gmail --format json --limit 100
+
+# Generate suggested replies in the user's voice for items needing a response
+python3 cli.py triage --provider gmail --draft --name "Anthony"
+
+# Use an explicit voice profile, or learn it from a corpus of sent messages
+python3 cli.py triage --draft --voice-file ~/.config/mail_automation/voice.json
+python3 cli.py triage --draft --samples-file ~/.config/mail_automation/sent_samples.txt
+```
+
 ### Legacy Commands (Backward Compatible)
 ```bash
 # Primary labeler (unlabeled emails)
@@ -111,6 +130,9 @@ launchctl list | grep com.user.gmail_labeler
 mail_automation/
 ├── core/                    # Shared components
 │   ├── rules.py            # LABEL_RULES, categorize_message()
+│   ├── research.py         # Per-item content & context research (ResearchDossier)
+│   ├── voice.py            # Learn & apply the user's speech patterns (VoiceProfile)
+│   ├── triage.py           # Prioritization scoring + orchestration (triage_messages)
 │   ├── state.py            # StateManager for crash recovery
 │   ├── models.py           # EmailMessage, LabelAction dataclasses
 │   └── config.py           # Multi-provider configuration
@@ -159,6 +181,27 @@ core/state.py        Progress persistence for resumption
 - `escalate_by_age()`: determines if email should be escalated based on age
 - `PRIORITY_LABELS`: labels that trigger starring
 - `KEEP_IN_INBOX`: labels that remain in inbox (not archived)
+
+**core/research.py** - Content & context research (offline, deterministic)
+- `ResearchDossier`: per-message extraction — summary, action items, questions,
+  deadlines, links, monetary amounts, entities, urgency, `requires_reply`
+- `research_message(message, body=None)`: mines `EmailMessage.content_text`
+  (subject + body/snippet), degrading gracefully to subject-only
+
+**core/voice.py** - User speech-pattern modelling (no LLM dependency)
+- `VoiceProfile`: greeting, sign-off, signature, formality, cadence, contractions, phrases
+- `learn_voice_profile(samples)`: derive a profile from the user's sent messages
+- `load_voice_profile()`: resolve from saved JSON → learn-from-corpus → neutral default
+  (default paths under `~/.config/mail_automation/`)
+- `VoiceProfile.draft_reply(dossier)`: compose a reply matching the user's voice
+  (learned openers are kept as a style signal but never pasted verbatim)
+
+**core/triage.py** - Prioritization + orchestration
+- `triage_messages(messages, voice=None, draft=False)`: categorize → escalate by
+  age → research → score → sort; returns ranked `TriageItem`s
+- `score_priority(...)`: transparent composite of tier, VIP, urgency, deadlines,
+  requires-reply, escalation, unread/starred and age
+- `render_triage(items, fmt)`: `text` / `markdown` / `json`
 
 **providers/base.py** - Abstract interface
 - `EmailProvider`: base class all providers implement
@@ -294,8 +337,12 @@ For bulk corrections of existing `Misc/Other` items, add to `SWEEP_RULES` in `bu
 # Verify imports
 python3 -c "from core import LABEL_RULES, categorize_message, PRIORITY_TIERS"
 python3 -c "from core import categorize_with_tier, escalate_by_age"
+python3 -c "from core import research_message, learn_voice_profile, triage_messages, render_triage"
 python3 -c "from providers.gmail import GmailProvider"
 python3 -c "from providers.outlook import OutlookProvider, CATEGORY_COLORS"
+
+# Unit tests for the triage pipeline (offline, no accounts needed)
+python3 -m pytest tests/test_research.py tests/test_voice.py tests/test_triage.py -q
 
 # Dry run test
 python3 cli.py label --provider gmail --dry-run --limit 10
@@ -311,6 +358,9 @@ python3 cli.py health --provider gmail
 
 # Generate summary
 python3 cli.py summary --provider gmail --limit 100
+
+# Triage pipeline (research + prioritization + voice-matched drafts)
+python3 cli.py triage --provider gmail --top 20 --draft --name "Anthony"
 ```
 
 <!-- ORGANVM:AUTO:START -->
