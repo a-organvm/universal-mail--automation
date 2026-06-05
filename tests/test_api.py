@@ -2,8 +2,9 @@
 
 from fastapi.testclient import TestClient
 
-from api import service
+from api import metering, service
 from api.app import app
+from api.store import get_store
 from core.models import EmailMessage
 from providers.base import ListMessagesResult, ProviderCapabilities
 
@@ -81,6 +82,24 @@ class _DryRunProvider(_FakeProvider):
         raise AssertionError("dry-run preview must not archive")
 
 
+def _clean_triage_result():
+    return {
+        "dry_run": False,
+        "provider": "fake",
+        "receipt": "Triage receipt: 1 message(s) -- gate held.",
+        "audit": {
+            "total": 1,
+            "protected_held": 0,
+            "archived": 1,
+            "moved": 0,
+            "labeled": 0,
+            "kept": 0,
+            "violations": [],
+        },
+        "processed": {"processed_count": 1},
+    }
+
+
 def test_triage_fail_closed_on_violation(monkeypatch):
     """The API must return 500 (not 200) if the audit trail proves a protected
     sender left the inbox — even if some upstream code reported it as archived."""
@@ -98,8 +117,13 @@ def test_triage_fail_closed_on_violation(monkeypatch):
 
     monkeypatch.setattr(service, "run_labeler", _fake_run_labeler)
     monkeypatch.setattr(service, "get_provider", lambda *a, **k: _FakeProvider())
+    acct = get_store().create_account(plan="free")
 
-    r = client.post("/v1/triage", json={"provider": "fake", "dry_run": False})
+    r = client.post(
+        "/v1/triage",
+        json={"provider": "fake", "dry_run": False},
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
     assert r.status_code == 500
     assert "GATE VIOLATION" in r.json()["detail"]
 
@@ -209,3 +233,98 @@ def test_triage_limit_upper_bound_enforced():
     assert r.status_code == 422
     r = client.post("/v1/triage/preview", json={"provider": "gmail", "limit": 0})
     assert r.status_code == 422
+
+
+def test_live_triage_requires_account_bearer(monkeypatch):
+    called = {"run": False}
+
+    def _run(**_kwargs):
+        called["run"] = True
+        return _clean_triage_result()
+
+    monkeypatch.setattr(service, "run_triage", _run)
+
+    r = client.post("/v1/triage", json={"provider": "fake", "dry_run": False})
+
+    assert r.status_code == 401
+    assert called["run"] is False
+
+
+def test_live_triage_reserves_monthly_allowance(monkeypatch):
+    monkeypatch.setattr(service, "run_triage", lambda **_kwargs: _clean_triage_result())
+    store = get_store()
+    acct = store.create_account(plan="free")
+
+    r = client.post(
+        "/v1/triage",
+        json={"provider": "fake", "dry_run": False},
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 200
+    assert store.get_usage_count(acct["id"], metering.current_period_key()) == 1
+    assert r.json()["run_id"].startswith("run_")
+
+
+def test_live_triage_exhausted_entitlement_rejected_before_service(monkeypatch):
+    called = {"run": False}
+
+    def _run(**_kwargs):
+        called["run"] = True
+        return _clean_triage_result()
+
+    monkeypatch.setattr(service, "run_triage", _run)
+    store = get_store()
+    acct = store.create_account(plan="free", run_credits=0)
+    period = metering.current_period_key()
+    for _ in range(50):
+        assert store.reserve_live_run(acct["id"], period, cap=50) is True
+
+    r = client.post(
+        "/v1/triage",
+        json={"provider": "fake", "dry_run": False},
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 402
+    assert called["run"] is False
+
+
+def test_live_triage_uses_credit_after_monthly_cap(monkeypatch):
+    monkeypatch.setattr(service, "run_triage", lambda **_kwargs: _clean_triage_result())
+    store = get_store()
+    acct = store.create_account(plan="free", run_credits=1)
+    period = metering.current_period_key()
+    for _ in range(50):
+        assert store.reserve_live_run(acct["id"], period, cap=50) is True
+
+    r = client.post(
+        "/v1/triage",
+        json={"provider": "fake", "dry_run": False},
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 200
+    assert store.get_account(acct["id"])["run_credits"] == 0
+    assert store.get_usage_count(acct["id"], period) == 50
+
+
+def test_live_triage_refunds_credit_on_provider_failure(monkeypatch):
+    def _run(**_kwargs):
+        raise service.ProviderUnavailable("provider is not available")
+
+    monkeypatch.setattr(service, "run_triage", _run)
+    store = get_store()
+    acct = store.create_account(plan="free", run_credits=1)
+    period = metering.current_period_key()
+    for _ in range(50):
+        assert store.reserve_live_run(acct["id"], period, cap=50) is True
+
+    r = client.post(
+        "/v1/triage",
+        json={"provider": "fake", "dry_run": False},
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 503
+    assert store.get_account(acct["id"])["run_credits"] == 1

@@ -21,6 +21,10 @@ cannot get a success result if a protected sender was archived.** That inverts t
 68+ existing Gmail MCP servers, which expose raw archive/delete with no
 decision-layer restraint.
 
+Live MCP triage (`triage(dry_run=False)`) also requires `account_api_key`. It uses
+the same account entitlement reservation as the HTTP API: monthly run allowance
+first, prepaid run credits second, and rollback on provider or gate failure.
+
 - **stdio** (local, Claude Desktop, any MCP client): `python -m mcp_server`
 - **Streamable HTTP** (hosted): mounted at `/mcp` on the main app; also runnable
   standalone via `uvicorn mcp_server.server:http_app`. Set `MCP_ALLOWED_HOSTS` to
@@ -28,7 +32,8 @@ decision-layer restraint.
 
 ## ACP — Agentic Commerce Protocol (how agents *buy* the tool)
 
-**The "ACP" we implement is the [Agentic Commerce Protocol](https://github.com/agentic-commerce-protocol/agentic-commerce-protocol)
+**The "ACP" we implement is the
+[Agentic Commerce Protocol](https://github.com/agentic-commerce-protocol/agentic-commerce-protocol)
 (OpenAI + Stripe), spec version `2026-04-17`.** It is the agent→merchant checkout
 standard. We chose it because it is the only "ACP" that is a *commerce/checkout*
 protocol and the only one co-developed with Stripe (our billing processor).

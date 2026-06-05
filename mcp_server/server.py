@@ -31,8 +31,9 @@ import os
 from mcp.server.fastmcp import FastMCP
 from mcp.server.streamable_http import TransportSecuritySettings
 
-from api import service
+from api import metering, service, triage_runtime
 from api.schemas import MAX_TRIAGE_LIMIT, SenderCheckResponse, TriageResponse
+from api.store import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,8 @@ INSTRUCTIONS = (
     "(government, financial, legal, platform-security), and every triage returns "
     "a verifiable audit receipt. Use check_protected_sender to pre-check a sender, "
     "triage_preview to see what WOULD change (touches nothing), and triage to "
-    "apply changes (dry_run=True by default; set dry_run=False to mutate the "
-    "mailbox)."
+    "apply changes (dry_run=True by default; set dry_run=False and provide an "
+    "account_api_key to mutate the mailbox)."
 )
 
 # stateless_http + json_response suit a horizontally-scaled hosted deploy.
@@ -115,25 +116,37 @@ def triage(
     tier_routing: bool = False,
     vip_only: bool = False,
     dry_run: bool = True,
+    account_api_key: Optional[str] = None,  # allow-secret: tool parameter
 ) -> TriageResponse:
     """Apply a triage (labels + archive per the rules). dry_run=True by DEFAULT —
-    pass dry_run=False to actually mutate the mailbox.
+    pass dry_run=False and account_api_key to actually mutate the mailbox.
 
     FAIL-CLOSED: if the independent audit proves a protected sender left the inbox,
     this raises (the run is rejected) rather than reporting success.
     """
     return _triage(provider, query, limit, dry_run=dry_run, remove_label=remove_label,
-                   tier_routing=tier_routing, vip_only=vip_only)
+                   tier_routing=tier_routing, vip_only=vip_only,
+                   account_api_key=account_api_key)
 
 
 def _triage(provider, query, limit, *, dry_run, remove_label, tier_routing,
-            vip_only) -> TriageResponse:
+            vip_only, account_api_key=None) -> TriageResponse:
+    account = None
+    if not dry_run:
+        if not account_api_key:
+            raise RuntimeError("live triage requires account_api_key")
+        account = get_store().get_account_by_api_key(account_api_key)  # allow-secret: var ref
+        if account is None:
+            raise RuntimeError("invalid account_api_key")
+
     try:
-        result = service.run_triage(
+        result = triage_runtime.run_triage_with_receipt(
             provider=provider, query=query, limit=_clamp_limit(limit),
             dry_run=dry_run, remove_label=remove_label,
-            tier_routing=tier_routing, vip_only=vip_only,
+            tier_routing=tier_routing, vip_only=vip_only, account=account,
         )
+    except metering.EntitlementExhausted as e:
+        raise RuntimeError(str(e)) from e
     except service.ProviderUnavailable as e:
         # Already generic (raw provider error logged in the service layer).
         raise RuntimeError(str(e)) from e

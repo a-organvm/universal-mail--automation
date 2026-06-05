@@ -21,7 +21,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from api import plans  # noqa: E402
-from api.well_known import build_agent_manifest, build_llms_txt  # noqa: E402
+from api.well_known import (  # noqa: E402
+    build_agent_manifest,
+    build_llms_txt,
+    build_server_registry,
+)
 
 # Placeholder host; real URLs are resolved live by the served routes
 # (/acp/feed.json, /.well-known/agent.json). The committed files are declarations.
@@ -71,26 +75,9 @@ def gen_pricing_md() -> str:
 
 
 def gen_server_json() -> dict:
-    return {
-        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-        "name": PKG,
-        "description": (
-            "Email triage an agent can't misuse: it can't archive a protected "
-            "sender, and every action returns a verifiable receipt."
-        ),
-        "version": "0.1.0",
-        "packages": [
-            {
-                "registryType": "pypi",
-                "identifier": "universal-mail-automation",
-                "version": "0.1.0",
-                "transport": {"type": "stdio"},
-            }
-        ],
-        "remotes": [
-            {"type": "streamable-http", "url": f"{BASE}/mcp"}
-        ],
-    }
+    registry = build_server_registry(BASE)
+    registry["name"] = PKG
+    return registry
 
 
 def main() -> None:

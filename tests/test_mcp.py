@@ -16,11 +16,30 @@ from mcp_server.server import (  # noqa: E402
     triage,
     triage_preview,
 )
-from api import service  # noqa: E402
+from api import metering, service  # noqa: E402
+from api.store import get_store  # noqa: E402
 
 
 def _tools():
     return asyncio.run(mcp.list_tools())
+
+
+def _clean_triage_result():
+    return {
+        "dry_run": False,
+        "provider": "fake",
+        "receipt": "Triage receipt: 1 message(s) -- gate held.",
+        "audit": {
+            "total": 1,
+            "protected_held": 0,
+            "archived": 1,
+            "moved": 0,
+            "labeled": 0,
+            "kept": 0,
+            "violations": [],
+        },
+        "processed": {"processed_count": 1},
+    }
 
 
 def test_three_tools_registered():
@@ -51,10 +70,52 @@ def test_triage_audit_violation_is_generic(monkeypatch):
         raise service.AuditInvariantError("msg-7 protected sender leaked id")
 
     monkeypatch.setattr(service, "run_triage", boom)
+    acct = get_store().create_account(plan="free")
     with pytest.raises(RuntimeError) as ei:
-        triage(dry_run=False)
+        triage(dry_run=False, account_api_key=acct["api_key"])
     assert "SAFETY GATE VIOLATION" in str(ei.value)
     assert "msg-7" not in str(ei.value)  # internal id never leaks to the agent
+
+
+def test_live_triage_requires_account_key(monkeypatch):
+    called = {"run": False}
+
+    def run(**_kwargs):
+        called["run"] = True
+        return _clean_triage_result()
+
+    monkeypatch.setattr(service, "run_triage", run)
+
+    with pytest.raises(RuntimeError) as ei:
+        triage(dry_run=False)
+
+    assert "account_api_key" in str(ei.value)
+    assert called["run"] is False
+
+
+def test_live_triage_uses_mcp_account_entitlement(monkeypatch):
+    monkeypatch.setattr(service, "run_triage", lambda **_kwargs: _clean_triage_result())
+    store = get_store()
+    acct = store.create_account(plan="free")
+
+    result = triage(dry_run=False, provider="fake", account_api_key=acct["api_key"])
+
+    assert result.run_id.startswith("run_")
+    assert store.get_usage_count(acct["id"], metering.current_period_key()) == 1
+
+
+def test_live_triage_uses_credit_after_monthly_cap(monkeypatch):
+    monkeypatch.setattr(service, "run_triage", lambda **_kwargs: _clean_triage_result())
+    store = get_store()
+    acct = store.create_account(plan="free", run_credits=1)
+    period = metering.current_period_key()
+    for _ in range(50):
+        assert store.reserve_live_run(acct["id"], period, cap=50) is True
+
+    triage(dry_run=False, provider="fake", account_api_key=acct["api_key"])
+
+    assert store.get_account(acct["id"])["run_credits"] == 0
+    assert store.get_usage_count(acct["id"], period) == 50
 
 
 def test_triage_provider_unavailable_maps_to_error(monkeypatch):

@@ -14,6 +14,47 @@ from api.store import get_store
 client = TestClient(app)
 
 
+class _Session:
+    id = "cs_test_123"
+    url = "https://stripe.example/session"
+
+
+class _CheckoutSessions:
+    def __init__(self):
+        self.params = None
+
+    def create(self, *, params):
+        self.params = params
+        return _Session()
+
+
+class _PortalSessions:
+    def __init__(self):
+        self.params = None
+
+    def create(self, *, params):
+        self.params = params
+        return _Session()
+
+
+class _Client:
+    def __init__(self):
+        self.checkout_sessions = _CheckoutSessions()
+        self.portal_sessions = _PortalSessions()
+
+        class _Checkout:
+            sessions = self.checkout_sessions
+
+        class _BillingPortal:
+            sessions = self.portal_sessions
+
+        class _V1:
+            checkout = _Checkout()
+            billing_portal = _BillingPortal()
+
+        self.v1 = _V1()
+
+
 def test_plans_public_no_creds():
     r = client.get("/v1/billing/plans")
     assert r.status_code == 200
@@ -32,6 +73,96 @@ def test_checkout_unconfigured_is_503(monkeypatch):
     monkeypatch.delenv("STRIPE_PRICE_PRO", raising=False)
     r = client.post("/v1/billing/checkout", json={"plan": "pro"})
     assert r.status_code == 503
+
+
+def test_checkout_existing_account_requires_bearer(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro_test")
+    store = get_store()
+    acct = store.create_account(plan="free")
+
+    r = client.post(
+        "/v1/billing/checkout",
+        json={"plan": "pro", "account_id": acct["id"]},
+    )
+
+    assert r.status_code == 401
+
+
+def test_checkout_existing_account_requires_matching_bearer(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro_test")
+    store = get_store()
+    target = store.create_account(plan="free")
+    other = store.create_account(plan="free")
+
+    r = client.post(
+        "/v1/billing/checkout",
+        json={"plan": "pro", "account_id": target["id"]},
+        headers={"Authorization": f"Bearer {other['api_key']}"},
+    )
+
+    assert r.status_code == 403
+
+
+def test_checkout_authenticated_account_reuses_existing_account(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro_test")
+    fake = _Client()
+    monkeypatch.setattr(billing, "_client", lambda: fake)
+    acct = get_store().create_account(plan="free")
+
+    r = client.post(
+        "/v1/billing/checkout",
+        json={"plan": "pro", "account_id": acct["id"]},
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["account_id"] == acct["id"]
+    assert fake.checkout_sessions.params["client_reference_id"] == acct["id"]
+
+
+def test_portal_requires_bearer_even_with_customer_id(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+
+    r = client.post(
+        "/v1/billing/portal",
+        json={"customer_id": "cus_known"},
+    )
+
+    assert r.status_code == 401
+
+
+def test_portal_rejects_customer_mismatch(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+    store = get_store()
+    acct = store.create_account(plan="pro")
+    store.link_customer(acct["id"], "cus_owned")
+
+    r = client.post(
+        "/v1/billing/portal",
+        json={"customer_id": "cus_other"},
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 403
+
+
+def test_portal_opens_for_authorized_account_customer(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+    fake = _Client()
+    monkeypatch.setattr(billing, "_client", lambda: fake)
+    store = get_store()
+    acct = store.create_account(plan="pro")
+    store.link_customer(acct["id"], "cus_owned")
+
+    r = client.post(
+        "/v1/billing/portal",
+        json={"account_id": acct["id"]},
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["url"] == _Session.url
+    assert fake.portal_sessions.params["customer"] == "cus_owned"
 
 
 def test_webhook_no_secret_is_503(monkeypatch):
@@ -145,6 +276,17 @@ def test_checkout_session_completed_sets_plan_from_metadata():
     assert got["plan"] == "pro"
     assert got["status"] == "active"
     assert got["stripe_customer_id"] == "cus_checkout"
+
+
+def test_resolve_account_prefers_existing_customer_mapping():
+    store = get_store()
+    mapped = store.create_account(plan="pro")
+    store.link_customer(mapped["id"], "cus_conflict")
+    stale_meta = store.create_account(plan="free")
+
+    resolved = billing._resolve_account(stale_meta["id"], "cus_conflict")
+
+    assert resolved == mapped["id"]
 
 
 def test_handle_subscription_canceled_drops_to_free():

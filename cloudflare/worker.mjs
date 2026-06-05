@@ -213,6 +213,116 @@ function billingPlans() {
   };
 }
 
+function baseUrl(request) {
+  const url = new URL(request.url);
+  return `${url.protocol}//${url.host}`;
+}
+
+function agentManifest(base) {
+  return {
+    schema_version: "v1",
+    name: "Universal Mail Automation",
+    description:
+      "Email triage with a fail-closed protected-sender gate and an independent, signed audit receipt.",
+    protocols: {
+      mcp: {
+        transport: "streamable-http",
+        url: `${base}/mcp`,
+        stdio: "python -m mcp_server",
+        tools: ["check_protected_sender", "triage_preview", "triage"],
+      },
+      agentic_commerce: {
+        spec_version: "2026-04-17",
+        checkout_url: `${base}/acp/checkout_sessions`,
+        product_feed: `${base}/acp/feed.json`,
+      },
+    },
+    api: {
+      base_url: base,
+      pricing: `${base}/v1/billing/plans`,
+      receipt_verification: `${base}/v1/audit/{run_id}`,
+    },
+    oauth_scopes: [],
+    safety: {
+      protected_sender_gate: "fail-closed",
+      audit_receipt: "independent, HMAC-signed, re-derivable",
+      deletion: "archive/move only — never hard-deletes",
+    },
+  };
+}
+
+function serverRegistry(base) {
+  return {
+    $schema:
+      "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+    name: "io.github.a-organvm/universal-mail-automation",
+    description:
+      "Email triage an agent can't misuse: it can't archive a protected sender, and every action returns a verifiable receipt.",
+    version: "0.1.0",
+    packages: [
+      {
+        registryType: "pypi",
+        identifier: "universal-mail-automation",
+        version: "0.1.0",
+        transport: { type: "stdio" },
+      },
+    ],
+    remotes: [{ type: "streamable-http", url: `${base}/mcp` }],
+  };
+}
+
+function productFeed(base) {
+  const packs = [
+    ["pack_100", "100 verified-safe triage runs", 100, 100],
+    ["pack_1000", "1,000 verified-safe triage runs", 1000, 900],
+  ];
+  return {
+    version: "2026-04-17",
+    seller_name: "Universal Mail Automation",
+    checkout_url: `${base}/acp/checkout_sessions`,
+    products: packs.map(([itemId, title, runs, price]) => ({
+      item_id: itemId,
+      title,
+      description: `${runs} triage runs with a fail-closed protected-sender gate and a signed, independently verifiable audit receipt per run.`,
+      url: `${base}/app/`,
+      brand: "Universal Mail Automation",
+      image_url: `${base}/app/`,
+      price,
+      currency: "USD",
+      availability: "in_stock",
+      is_digital: true,
+      is_eligible_search: true,
+      is_eligible_checkout: true,
+      seller_name: "Universal Mail Automation",
+      seller_url: base,
+      target_countries: ["US"],
+      store_country: "US",
+    })),
+  };
+}
+
+function docsPage(base) {
+  return [
+    "<!doctype html>",
+    '<html lang="en"><meta charset="utf-8">',
+    "<title>Universal Mail Automation API</title>",
+    '<meta name="viewport" content="width=device-width,initial-scale=1">',
+    '<body style="font:16px/1.5 system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 20px">',
+    "<h1>Universal Mail Automation API</h1>",
+    "<p>This share Worker exposes the demo endpoints used by the webpage. The Python FastAPI app remains the canonical backend.</p>",
+    "<ul>",
+    `<li><a href="${base}/health">GET /health</a></li>`,
+    "<li>POST /v1/senders/check</li>",
+    "<li>POST /v1/triage/preview</li>",
+    `<li><a href="${base}/v1/billing/plans">GET /v1/billing/plans</a></li>`,
+    `<li><a href="${base}/.well-known/agent.json">GET /.well-known/agent.json</a></li>`,
+    `<li><a href="${base}/server.json">GET /server.json</a></li>`,
+    `<li><a href="${base}/llms.txt">GET /llms.txt</a></li>`,
+    "</ul>",
+    "</body></html>",
+  ].join("");
+}
+
 async function readJson(request) {
   try {
     return await request.json();
@@ -264,6 +374,24 @@ export default {
 
     if (url.pathname === "/v1/billing/plans" && request.method === "GET") {
       return json(billingPlans());
+    }
+
+    if (url.pathname === "/docs" && request.method === "GET") {
+      return new Response(docsPage(baseUrl(request)), {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }
+
+    if (url.pathname === "/.well-known/agent.json" && request.method === "GET") {
+      return json(agentManifest(baseUrl(request)));
+    }
+
+    if (url.pathname === "/server.json" && request.method === "GET") {
+      return json(serverRegistry(baseUrl(request)));
+    }
+
+    if (url.pathname === "/acp/feed.json" && request.method === "GET") {
+      return json(productFeed(baseUrl(request)));
     }
 
     if (url.pathname === "/v1/billing/checkout" && request.method === "POST") {

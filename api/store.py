@@ -95,6 +95,14 @@ CREATE TABLE IF NOT EXISTS acp_fulfillments (
     runs         INTEGER NOT NULL,
     fulfilled_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS usage_counters (
+    account_id TEXT NOT NULL,
+    period     TEXT NOT NULL,
+    live_runs  INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (account_id, period)
+);
 """
 
 # A request that crashed while holding an idempotency key would otherwise leave it
@@ -167,12 +175,108 @@ class Store:
     def get_account(self, account_id: str) -> Optional[Dict[str, Any]]:
         return self._fetch_one("SELECT * FROM accounts WHERE id = ?", (account_id,))
 
-    def get_account_by_api_key(self, api_key: str) -> Optional[Dict[str, Any]]:  # allow-secret: param name
+    def get_account_by_api_key(
+        self, api_key: str  # allow-secret: param name, not a value
+    ) -> Optional[Dict[str, Any]]:
         if not api_key:
             return None
         return self._fetch_one(
-            "SELECT * FROM accounts WHERE api_key = ?", (api_key,)  # allow-secret: SQL placeholder
+            "SELECT * FROM accounts WHERE api_key = ?",  # allow-secret: SQL column
+            (api_key,),  # allow-secret: SQL placeholder
         )
+
+    def get_or_create_account_by_api_key(
+        self, api_key: str, *, plan: str = "free", status: str = "active"  # allow-secret: param name, not a value
+    ) -> Dict[str, Any]:
+        """Return the account for ``api_key``, creating it atomically if absent."""
+        with self._lock:
+            existing = self._fetch_one_nolock(
+                "SELECT * FROM accounts WHERE api_key = ?",  # allow-secret: SQL column
+                (api_key,),  # allow-secret: SQL placeholder
+            )
+            if existing is not None:
+                return existing
+
+            account_id = "acct_" + secrets.token_hex(12)
+            now = _now()
+            self._conn.execute(
+                "INSERT INTO accounts (id, plan, status, api_key, created_at, "
+                "updated_at) VALUES (?,?,?,?,?,?)",
+                (account_id, plan, status, api_key, now, now),  # allow-secret: var ref
+            )
+            self._conn.commit()
+            created = self._fetch_one_nolock(
+                "SELECT * FROM accounts WHERE id = ?", (account_id,)
+            )
+            if created is None:  # pragma: no cover - defensive invariant
+                raise RuntimeError("account creation failed")
+            return created
+
+    def get_or_create_account_for_customer(
+        self,
+        customer_id: Optional[str],
+        *,
+        account_id: Optional[str] = None,
+        plan: str = "free",
+        status: str = "active",
+    ) -> Dict[str, Any]:
+        """Return the account for a Stripe customer, creating the mapping once.
+
+        Stripe events can arrive concurrently or with conflicting metadata. The
+        customer id is the stronger identity: if it is already mapped, that
+        account wins over a later metadata account_id. New customer mappings are
+        inserted with the customer id already set so the UNIQUE constraint
+        deduplicates concurrent webhook deliveries.
+        """
+        with self._lock:
+            if customer_id:
+                existing = self._fetch_one_nolock(
+                    "SELECT * FROM accounts WHERE stripe_customer_id = ?",
+                    (customer_id,),
+                )
+                if existing is not None:
+                    return existing
+
+            if account_id:
+                existing = self._fetch_one_nolock(
+                    "SELECT * FROM accounts WHERE id = ?", (account_id,)
+                )
+                if existing is not None:
+                    return existing
+
+            new_id = account_id or ("acct_" + secrets.token_hex(12))
+            now = _now()
+            api_key = new_api_key()  # allow-secret: generated local variable, not a literal
+            try:
+                self._conn.execute(
+                    "INSERT INTO accounts (id, stripe_customer_id, plan, status, "
+                    "api_key, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+                    (new_id, customer_id, plan, status, api_key, now, now),
+                )
+                self._conn.commit()
+            except sqlite3.IntegrityError:
+                self._conn.rollback()
+                if customer_id:
+                    existing = self._fetch_one_nolock(
+                        "SELECT * FROM accounts WHERE stripe_customer_id = ?",
+                        (customer_id,),
+                    )
+                    if existing is not None:
+                        return existing
+                if account_id:
+                    existing = self._fetch_one_nolock(
+                        "SELECT * FROM accounts WHERE id = ?", (account_id,)
+                    )
+                    if existing is not None:
+                        return existing
+                raise
+
+            created = self._fetch_one_nolock(
+                "SELECT * FROM accounts WHERE id = ?", (new_id,)
+            )
+            if created is None:  # pragma: no cover - defensive invariant
+                raise RuntimeError("account creation failed")
+            return created
 
     def get_account_by_customer(self, customer_id: str) -> Optional[Dict[str, Any]]:
         return self._fetch_one(
@@ -244,6 +348,55 @@ class Store:
             )
             self._conn.commit()
             return cur.rowcount > 0
+
+    # -- usage metering -----------------------------------------------------
+    def reserve_live_run(self, account_id: str, period: str, cap: Optional[int]) -> bool:
+        """Atomically reserve one live triage run within ``cap`` for ``period``.
+
+        ``cap=None`` means unlimited. The counter is incremented before mailbox
+        mutation, then refunded by ``refund_live_run`` if the run fails.
+        """
+        with self._lock:
+            now = _now()
+            self._conn.execute(
+                "INSERT OR IGNORE INTO usage_counters "
+                "(account_id, period, live_runs, updated_at) VALUES (?,?,0,?)",
+                (account_id, period, now),
+            )
+            if cap is None:
+                cur = self._conn.execute(
+                    "UPDATE usage_counters SET live_runs = live_runs + 1, "
+                    "updated_at = ? WHERE account_id = ? AND period = ?",
+                    (now, account_id, period),
+                )
+            else:
+                cur = self._conn.execute(
+                    "UPDATE usage_counters SET live_runs = live_runs + 1, "
+                    "updated_at = ? WHERE account_id = ? AND period = ? "
+                    "AND live_runs < ?",
+                    (now, account_id, period, int(cap)),
+                )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def refund_live_run(self, account_id: str, period: str) -> None:
+        """Undo one prior live-run reservation without underflowing the counter."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE usage_counters SET live_runs = live_runs - 1, "
+                "updated_at = ? WHERE account_id = ? AND period = ? "
+                "AND live_runs > 0",
+                (_now(), account_id, period),
+            )
+            self._conn.commit()
+
+    def get_usage_count(self, account_id: str, period: str) -> int:
+        row = self._fetch_one(
+            "SELECT live_runs FROM usage_counters WHERE account_id = ? "
+            "AND period = ?",
+            (account_id, period),
+        )
+        return int(row["live_runs"]) if row else 0
 
     # -- webhook dedup ------------------------------------------------------
     def mark_event_processed(self, event_id: str, event_type: str = "") -> bool:

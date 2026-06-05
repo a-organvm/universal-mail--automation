@@ -18,6 +18,41 @@ def test_account_create_and_lookup():
     assert s.get_account_by_api_key("nope") is None
 
 
+def test_get_or_create_account_by_api_key_is_stable():
+    s = _store()
+    acct = s.get_or_create_account_by_api_key("agent_key")
+    again = s.get_or_create_account_by_api_key("agent_key")
+    other = s.get_or_create_account_by_api_key("other_key")
+
+    assert acct["id"] == again["id"]
+    assert acct["api_key"] == "agent_key"
+    assert other["id"] != acct["id"]
+
+
+def test_get_or_create_account_for_customer_prefers_customer_mapping():
+    s = _store()
+    mapped = s.get_or_create_account_for_customer("cus_1")
+    other = s.create_account()
+
+    assert mapped["stripe_customer_id"] == "cus_1"
+    assert s.get_or_create_account_for_customer("cus_1")["id"] == mapped["id"]
+    assert (
+        s.get_or_create_account_for_customer("cus_1", account_id=other["id"])["id"]
+        == mapped["id"]
+    )
+
+
+def test_get_or_create_account_for_customer_uses_existing_account_id():
+    s = _store()
+    acct = s.create_account()
+
+    resolved = s.get_or_create_account_for_customer(
+        "cus_existing", account_id=acct["id"]
+    )
+
+    assert resolved["id"] == acct["id"]
+
+
 def test_set_subscription_partial_update_does_not_clobber():
     s = _store()
     acct = s.create_account(plan="free")
@@ -41,6 +76,32 @@ def test_credits_atomic_no_overdraw():
     # Cannot consume more than the balance.
     assert s.consume_credit(acct["id"], 5) is False
     assert s.get_account(acct["id"])["run_credits"] == 2
+
+
+def test_live_run_usage_cap_and_refund():
+    s = _store()
+    acct = s.create_account()
+    period = "2026-06"
+
+    assert s.reserve_live_run(acct["id"], period, cap=2) is True
+    assert s.reserve_live_run(acct["id"], period, cap=2) is True
+    assert s.reserve_live_run(acct["id"], period, cap=2) is False
+    assert s.get_usage_count(acct["id"], period) == 2
+
+    s.refund_live_run(acct["id"], period)
+    assert s.get_usage_count(acct["id"], period) == 1
+    assert s.reserve_live_run(acct["id"], period, cap=2) is True
+
+
+def test_live_run_usage_unlimited_cap():
+    s = _store()
+    acct = s.create_account()
+    period = "2026-06"
+
+    for _ in range(3):
+        assert s.reserve_live_run(acct["id"], period, cap=None) is True
+
+    assert s.get_usage_count(acct["id"], period) == 3
 
 
 def test_webhook_event_dedup():

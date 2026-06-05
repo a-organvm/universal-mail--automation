@@ -1,0 +1,54 @@
+"""Shared triage execution for HTTP and MCP entry points."""
+
+from __future__ import annotations
+
+import secrets
+from typing import Optional
+
+from api import metering, receipts, service
+
+
+class AccountRequired(RuntimeError):
+    """Raised when a live triage run is requested without an account."""
+
+
+def run_triage_with_receipt(
+    *,
+    provider: str,
+    query: str,
+    limit: int,
+    dry_run: bool,
+    remove_label: Optional[str],
+    tier_routing: bool,
+    vip_only: bool,
+    account: Optional[dict] = None,
+) -> dict:
+    """Run triage through the safety gate, metering live mutations when needed."""
+    if not dry_run and account is None:
+        raise AccountRequired("live triage requires an account")
+
+    reservation = None
+    if not dry_run and account is not None:
+        reservation = metering.reserve_live_run(account)
+
+    try:
+        result = service.run_triage(
+            provider=provider,
+            query=query,
+            limit=limit,
+            dry_run=dry_run,
+            remove_label=remove_label,
+            tier_routing=tier_routing,
+            vip_only=vip_only,
+        )
+    except Exception:
+        if reservation is not None:
+            reservation.rollback()
+        raise
+
+    run_id = "run_" + secrets.token_hex(12)
+    result["run_id"] = run_id
+    receipts.persist(run_id, result, account_id=account["id"] if account else None)
+    if reservation is not None:
+        reservation.commit()
+    return result

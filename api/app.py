@@ -19,13 +19,23 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import secrets
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 
 from acp import feed as acp_feed
 from acp import router as acp_router
-from api import __version__, billing, receipts, schemas, service, well_known
+from api import (
+    __version__,
+    billing,
+    metering,
+    receipts,
+    schemas,
+    service,
+    triage_runtime,
+    well_known,
+)
+from api.auth import require_authorized_account
 
 logger = logging.getLogger(__name__)
 
@@ -89,14 +99,17 @@ def triage_preview(req: schemas.TriageRequest) -> dict:
 
 
 @app.post("/v1/triage", response_model=schemas.TriageResponse)
-def triage(req: schemas.TriageRequest) -> dict:
+def triage(req: schemas.TriageRequest, request: Request) -> dict:
     """Run a triage. Honors req.dry_run; fail-closed on any gate violation."""
-    return _run(req, dry_run=req.dry_run)
+    account = None if req.dry_run else require_authorized_account(request)
+    return _run(req, dry_run=req.dry_run, account=account)
 
 
-def _run(req: schemas.TriageRequest, *, dry_run: bool) -> dict:
+def _run(
+    req: schemas.TriageRequest, *, dry_run: bool, account: Optional[dict] = None
+) -> dict:
     try:
-        result = service.run_triage(
+        return triage_runtime.run_triage_with_receipt(
             provider=req.provider,
             query=req.query,
             limit=req.limit,
@@ -104,7 +117,12 @@ def _run(req: schemas.TriageRequest, *, dry_run: bool) -> dict:
             remove_label=req.remove_label,
             tier_routing=req.tier_routing,
             vip_only=req.vip_only,
+            account=account,
         )
+    except triage_runtime.AccountRequired:
+        raise HTTPException(status_code=401, detail="missing bearer credentials")
+    except metering.EntitlementExhausted as e:
+        raise HTTPException(status_code=402, detail=str(e))
     except service.ProviderUnavailable as e:
         # `e` is already a generic, non-sensitive message (the raw provider error
         # is logged in the service layer, never returned to the client).
@@ -120,14 +138,6 @@ def _run(req: schemas.TriageRequest, *, dry_run: bool) -> dict:
             detail="SAFETY GATE VIOLATION: a protected sender was moved out of "
             "the inbox; the run was rejected.",
         )
-
-    # Mint a run id and persist a signed receipt so the run is independently
-    # verifiable at GET /v1/audit/{run_id}. Best-effort: a ledger failure never
-    # downgrades a safe, gate-respecting run (the invariant already passed above).
-    run_id = "run_" + secrets.token_hex(12)
-    result["run_id"] = run_id
-    receipts.persist(run_id, result)
-    return result
 
 
 # --- additional product surfaces ---------------------------------------------

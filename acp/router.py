@@ -67,6 +67,7 @@ def register_acp_handlers(app) -> None:
 class GateContext:
     api_key: str  # allow-secret: field declaration, not a value
     idempotency_key: Optional[str]
+    account_id: str
 
 
 def _gate(request: Request, *, require_idempotency: bool) -> GateContext:
@@ -90,11 +91,24 @@ def _gate(request: Request, *, require_idempotency: bool) -> GateContext:
         if len(idem) > 255:
             raise ACPError(400, "invalid_idempotency_key",
                            "Idempotency-Key exceeds 255 chars", "Idempotency-Key")
-    return GateContext(api_key=api_key, idempotency_key=idem)  # allow-secret: var refs
+    account = get_store().get_or_create_account_by_api_key(
+        api_key  # allow-secret: var ref
+    )
+    return GateContext(
+        api_key=api_key,  # allow-secret: var ref
+        idempotency_key=idem,
+        account_id=account["id"],
+    )
 
 
 def _request_hash(raw: bytes) -> str:
     return hashlib.sha256(raw or b"").hexdigest()
+
+
+def _idempotency_key(ctx: GateContext, scope: str) -> str:
+    """Namespace caller-provided keys by account and endpoint scope."""
+    raw = f"{ctx.account_id}:{scope}:{ctx.idempotency_key}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _begin_idempotency(ctx: GateContext, raw: bytes, scope: str) -> Optional[dict]:
@@ -102,7 +116,7 @@ def _begin_idempotency(ctx: GateContext, raw: bytes, scope: str) -> Optional[dic
     returns it with Idempotent-Replayed: true), None to proceed. Raises ACPError
     on 409 (still processing) / 422 (same key, different payload)."""
     state = get_store().idempotency_begin(
-        ctx.idempotency_key, scope, _request_hash(raw)
+        _idempotency_key(ctx, scope), scope, _request_hash(raw)
     )
     if state["state"] == "new":
         return None
@@ -117,9 +131,11 @@ def _begin_idempotency(ctx: GateContext, raw: bytes, scope: str) -> Optional[dic
     return state["response"]  # replay
 
 
-def _complete_idempotency(ctx: GateContext, response: dict) -> None:
+def _complete_scoped_idempotency(
+    ctx: GateContext, scope: str, response: dict
+) -> None:
     if ctx.idempotency_key:
-        get_store().idempotency_complete(ctx.idempotency_key, response)
+        get_store().idempotency_complete(_idempotency_key(ctx, scope), response)
 
 
 def _links(request: Request) -> list:
@@ -155,9 +171,11 @@ def _persist(session_id: str, response: dict, total_runs: int,
     )
 
 
-def _load(session_id: str) -> dict:
+def _load(session_id: str, ctx: GateContext) -> dict:
     row = get_store().get_session(session_id)
     if row is None:
+        raise ACPError(404, "session_not_found", "checkout session not found", "id")
+    if row.get("account_id") != ctx.account_id:
         raise ACPError(404, "session_not_found", "checkout session not found", "id")
     return row
 
@@ -166,8 +184,9 @@ def _load(session_id: str) -> dict:
 @router.post("/checkout_sessions")
 async def create_session(body: models.CheckoutCreate, request: Request):
     ctx = _gate(request, require_idempotency=True)
+    scope = "acp.create"
     raw = await request.body()
-    replay = _begin_idempotency(ctx, raw, "acp.create")
+    replay = _begin_idempotency(ctx, raw, scope)
     if replay is not None:
         return JSONResponse(replay, headers={"Idempotent-Replayed": "true"})
 
@@ -185,15 +204,15 @@ async def create_session(body: models.CheckoutCreate, request: Request):
                   line_items=line_items,
                   buyer=body.buyer.model_dump() if body.buyer else None,
                   messages=messages)
-    _persist(session_id, resp, total_runs)
-    _complete_idempotency(ctx, resp)
+    _persist(session_id, resp, total_runs, account_id=ctx.account_id)
+    _complete_scoped_idempotency(ctx, scope, resp)
     return JSONResponse(resp)
 
 
 @router.get("/checkout_sessions/{session_id}")
 async def get_session(session_id: str, request: Request):
-    _gate(request, require_idempotency=False)
-    row = _load(session_id)
+    ctx = _gate(request, require_idempotency=False)
+    row = _load(session_id, ctx)
     return JSONResponse(row["data"]["response"])
 
 
@@ -201,12 +220,13 @@ async def get_session(session_id: str, request: Request):
 async def update_session(session_id: str, body: models.CheckoutUpdate,
                          request: Request):
     ctx = _gate(request, require_idempotency=True)
+    scope = f"acp.update:{session_id}"
     raw = await request.body()
-    replay = _begin_idempotency(ctx, raw, "acp.update")
+    replay = _begin_idempotency(ctx, raw, scope)
     if replay is not None:
         return JSONResponse(replay, headers={"Idempotent-Replayed": "true"})
 
-    row = _load(session_id)
+    row = _load(session_id, ctx)
     current = row["data"]["response"]
     if current["status"] in (models.STATUS_COMPLETED, models.STATUS_CANCELED,
                              models.STATUS_EXPIRED):
@@ -227,8 +247,8 @@ async def update_session(session_id: str, body: models.CheckoutUpdate,
     buyer = body.buyer.model_dump() if body.buyer else current.get("buyer")
     resp = _shape(request, session_id=session_id, status=status,
                   line_items=line_items, buyer=buyer)
-    _persist(session_id, resp, total_runs)
-    _complete_idempotency(ctx, resp)
+    _persist(session_id, resp, total_runs, account_id=ctx.account_id)
+    _complete_scoped_idempotency(ctx, scope, resp)
     return JSONResponse(resp)
 
 
@@ -236,18 +256,19 @@ async def update_session(session_id: str, body: models.CheckoutUpdate,
 async def complete_session(session_id: str, body: models.CheckoutComplete,
                            request: Request):
     ctx = _gate(request, require_idempotency=True)
+    scope = f"acp.complete:{session_id}"
     raw = await request.body()
-    replay = _begin_idempotency(ctx, raw, "acp.complete")
+    replay = _begin_idempotency(ctx, raw, scope)
     if replay is not None:
         return JSONResponse(replay, headers={"Idempotent-Replayed": "true"})
 
-    row = _load(session_id)
+    row = _load(session_id, ctx)
     current = row["data"]["response"]
     total_runs = row["data"]["total_runs"]
 
     if current["status"] == models.STATUS_COMPLETED:
         # Already fulfilled — return the completed session idempotently.
-        _complete_idempotency(ctx, current)
+        _complete_scoped_idempotency(ctx, scope, current)
         return JSONResponse(current)
     if current["status"] != models.STATUS_READY:
         raise ACPError(400, "invalid_state",
@@ -275,8 +296,8 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
                       buyer=(body.buyer.model_dump() if body.buyer
                              else current.get("buyer")),
                       messages=messages)
-        _persist(session_id, resp, total_runs)
-        _complete_idempotency(ctx, resp)
+        _persist(session_id, resp, total_runs, account_id=ctx.account_id)
+        _complete_scoped_idempotency(ctx, scope, resp)
         return JSONResponse(resp, status_code=402)
 
     # Fulfillment: credit runs to the buyer's account (keyed by their api_key)
@@ -284,9 +305,10 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
     # /complete cannot double-credit. Paired with the per-session charge key above,
     # the whole completion is idempotent and crash-retry-safe.
     store = get_store()
-    account = store.get_account_by_api_key(ctx.api_key)
-    if account is None:
-        account = store.create_account(api_key=ctx.api_key, plan="free")  # allow-secret: var ref
+    account = store.get_account(ctx.account_id)
+    if account is None:  # pragma: no cover - defensive invariant
+        raise ACPError(401, "unauthorized", "missing bearer credentials",
+                       "Authorization")
     fulfilled = store.fulfill_once(session_id, account["id"], total_runs)
 
     base = str(request.base_url).rstrip("/")
@@ -335,25 +357,26 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
                          else current.get("buyer")),
                   order=order, messages=messages)
     _persist(session_id, resp, total_runs, account_id=account["id"])
-    _complete_idempotency(ctx, resp)
+    _complete_scoped_idempotency(ctx, scope, resp)
     return JSONResponse(resp)
 
 
 @router.post("/checkout_sessions/{session_id}/cancel")
 async def cancel_session(session_id: str, request: Request):
     ctx = _gate(request, require_idempotency=True)
+    scope = f"acp.cancel:{session_id}"
     raw = await request.body()
-    replay = _begin_idempotency(ctx, raw, "acp.cancel")
+    replay = _begin_idempotency(ctx, raw, scope)
     if replay is not None:
         return JSONResponse(replay, headers={"Idempotent-Replayed": "true"})
 
-    row = _load(session_id)
+    row = _load(session_id, ctx)
     current = row["data"]["response"]
     if current["status"] == models.STATUS_COMPLETED:
         raise ACPError(400, "invalid_state", "cannot cancel a completed session",
                        "status")
     resp = _shape(request, session_id=session_id, status=models.STATUS_CANCELED,
                   line_items=current["line_items"], buyer=current.get("buyer"))
-    _persist(session_id, resp, row["data"]["total_runs"])
-    _complete_idempotency(ctx, resp)
+    _persist(session_id, resp, row["data"]["total_runs"], account_id=ctx.account_id)
+    _complete_scoped_idempotency(ctx, scope, resp)
     return JSONResponse(resp)

@@ -19,6 +19,9 @@
     --accent-2: #1f6feb;
     --accent-soft: #ddf4f1;
     --accent-soft-2: #dbeafe;
+    --green: var(--accent);
+    --green-2: var(--accent-2);
+    --green-soft: var(--accent-soft);
     --red: #b42318;
     --red-soft: #fce7e5;
     --amber: #9a6700;
@@ -548,7 +551,7 @@
       <div>
         <strong style="color:var(--ink)">Developers</strong>
         <a href="/docs">API reference</a>
-        <a href="/mcp">MCP endpoint</a>
+        <a href="/server.json">MCP registry</a>
         <a href="/llms.txt">llms.txt</a>
         <a href="/health">Health</a>
       </div>
@@ -587,76 +590,6 @@ const SAMPLE_PLANS = [
   },
 ];
 
-function localSenderCheck(sender) {
-  const value = String(sender || "").trim().toLowerCase();
-  const isProtected = !value || value.endsWith(".gov") || value.includes("chase.com") || value.includes("1password.com");
-  if (!value) {
-    return {
-      sender,
-      protected: true,
-      categorization: {
-        label: "Misc/Other",
-        tier: 4,
-        time_sensitive: false,
-        tier_config: { number: 4, name: "Reference", color: "green", folder: null, keep_in_inbox: false, star: false },
-        is_vip: false,
-        vip_note: "",
-      },
-    };
-  }
-  if (value.includes("courts.ca.gov")) {
-    return {
-      sender,
-      protected: true,
-      categorization: {
-        label: "Personal/Government",
-        tier: 1,
-        time_sensitive: true,
-        tier_config: { number: 1, name: "Critical", color: "red", folder: "Action/Critical", keep_in_inbox: true, star: true },
-        is_vip: false,
-        vip_note: "",
-      },
-    };
-  }
-  if (value.includes("chase.com")) {
-    return {
-      sender,
-      protected: true,
-      categorization: {
-        label: "Finance/Banking",
-        tier: 1,
-        time_sensitive: true,
-        tier_config: { number: 1, name: "Critical", color: "red", folder: "Action/Critical", keep_in_inbox: true, star: true },
-        is_vip: false,
-        vip_note: "",
-      },
-    };
-  }
-  return {
-    sender,
-    protected: isProtected,
-    categorization: {
-      label: value.includes("deal") || value.includes("news") ? "Marketing" : "Misc/Other",
-      tier: value.includes("deal") || value.includes("news") ? 3 : 4,
-      time_sensitive: false,
-      tier_config: { number: value.includes("deal") || value.includes("news") ? 3 : 4, name: value.includes("deal") || value.includes("news") ? "Delegate" : "Reference", color: "amber", folder: null, keep_in_inbox: false, star: false },
-      is_vip: false,
-      vip_note: "",
-    },
-  };
-}
-
-function localPreviewResult() {
-  return {
-    dry_run: true,
-    provider: $("provider").value,
-    receipt: "Triage receipt: 3 message(s) — 2 protected held in inbox, 1 would leave inbox, 0 labeled-inbox, 0 kept.",
-    audit: { total: 3, protected_held: 2, archived: 1, moved: 0, labeled: 0, kept: 0, violations: [] },
-    processed: { processed_count: 1, success_count: 1, error_count: 0, label_counts: { Marketing: 1 }, errors: [] },
-    run_id: "demo_local_preview",
-  };
-}
-
 function localPlans() {
   return SAMPLE_PLANS;
 }
@@ -686,14 +619,20 @@ function escapeHtml(s) {
 $("checkBtn").addEventListener("click", async () => {
   const btn = $("checkBtn"), out = $("checkResult");
   const sender = $("sender").value.trim();
-  if (!sender) { out.innerHTML = ''; return; }
   btn.disabled = true; out.innerHTML = '<p class="meta">Checking…</p>';
   const { ok, status, data } = await postJSON("/v1/senders/check", { sender, subject: $("subject").value });
   btn.disabled = false;
-  const payload = ok && data ? data : localSenderCheck(sender);
-  if (!payload) { out.innerHTML = `<div class="notice err">Request failed (${status}).</div>`; return; }
+  if (!ok || !data) {
+    const detail = data && data.detail ? ` ${escapeHtml(data.detail)}` : "";
+    const message = status === 0
+      ? "Cannot reach the API. Serve this page from the FastAPI app or the Worker demo."
+      : `Sender check failed (${status}).${detail}`;
+    out.innerHTML = `<div class="notice err">${message}</div>`;
+    return;
+  }
+  const payload = data;
   const cat = payload.categorization || {};
-  const tier = cat.tier != null ? `tier ${cat.tier}` : "";
+  const tier = cat.tier != null ? `tier ${escapeHtml(cat.tier)}` : "";
   const label = cat.label ? `categorized as <strong>${escapeHtml(cat.label)}</strong>` : "";
   const extra = [label, tier].filter(Boolean).join(" · ");
   if (payload.protected) {
@@ -722,24 +661,22 @@ $("previewBtn").addEventListener("click", async () => {
     provider: $("provider").value, query: $("query").value, limit: parseInt($("limit").value, 10) || 50,
   });
   btn.disabled = false;
-  if (status === 503 || !ok || !data) {
-    const fallback = localPreviewResult();
-    out.innerHTML = `
-      <div class="notice warn">This share link is running in static mode. The live backend demo needs a connected server, but the preview still shows the intended disposition and receipt format.</div>
-      <div class="receipt">${escapeHtml(fallback.receipt || "")}</div>
-      <table>
-        <tr><th>Disposition</th><th>Count</th></tr>
-        <tr><td>Protected — held in inbox</td><td class="held">${fallback.audit.protected_held}</td></tr>
-        <tr><td>Archived</td><td>${fallback.audit.archived}</td></tr>
-        <tr><td>Moved</td><td>${fallback.audit.moved}</td></tr>
-        <tr><td>Labeled</td><td>${fallback.audit.labeled}</td></tr>
-        <tr><td>Kept</td><td>${fallback.audit.kept}</td></tr>
-        <tr><td>Gate violations</td><td class="violations-ok">0 — gate held</td></tr>
-      </table>`;
-    return;
-  }
   if (status === 500 && data && /SAFETY GATE/.test(data.detail || "")) {
     out.innerHTML = `<div class="notice err">${escapeHtml(data.detail)}</div>`; return;
+  }
+  if (status === 0) {
+    out.innerHTML = `<div class="notice err">Cannot reach the API. Serve this page from the FastAPI app or the Worker demo.</div>`;
+    return;
+  }
+  if (status === 503) {
+    const detail = data && data.detail ? escapeHtml(data.detail) : "provider is not available";
+    out.innerHTML = `<div class="notice warn">${detail}. Connect provider credentials on the server, then run the preview again.</div>`;
+    return;
+  }
+  if (!ok || !data) {
+    const detail = data && data.detail ? ` ${escapeHtml(data.detail)}` : "";
+    out.innerHTML = `<div class="notice err">Preview failed (${status}).${detail}</div>`;
+    return;
   }
   const a = data.audit || {};
   const viol = (a.violations || []).length;
@@ -771,10 +708,14 @@ async function startCheckout(planId, btn) {
   const { ok, status, data } = await postJSON("/v1/billing/checkout", { plan: planId, email });
   if (ok && data && data.url) { window.location.href = data.url; return; }
   btn.disabled = false; btn.textContent = prev;
-  if (status === 503) {
-    msg.innerHTML = `<div class="notice warn">Billing isn't live on this server yet (Stripe keys not configured). The plan, gate and receipts all work — only the card step is pending setup.</div>`;
+  if (status === 0) {
+    msg.innerHTML = `<div class="notice err">Cannot reach the billing API from this page.</div>`;
+  } else if (status === 503) {
+    const detail = data && data.detail ? escapeHtml(data.detail) : "billing is not configured";
+    msg.innerHTML = `<div class="notice warn">${detail}. Stripe keys need to be configured before checkout can redirect.</div>`;
   } else {
-    msg.innerHTML = `<div class="notice err">Couldn't start checkout (${status}). Try again shortly.</div>`;
+    const detail = data && data.detail ? ` ${escapeHtml(data.detail)}` : "";
+    msg.innerHTML = `<div class="notice err">Couldn't start checkout (${status}).${detail}</div>`;
   }
 }
 
@@ -803,7 +744,7 @@ async function startCheckout(planId, btn) {
         </ul>`;
       const btn = document.createElement("button");
       btn.className = "btn " + (buyable ? "btn-buy" : "btn-free");
-      btn.textContent = buyable ? `Get ${escapeHtml(p.name || p.id)}` : "Start free";
+      btn.textContent = buyable ? `Get ${p.name || p.id}` : "Start free";
       if (buyable) {
         btn.addEventListener("click", () => startCheckout(p.id, btn));
       } else {
@@ -815,7 +756,7 @@ async function startCheckout(planId, btn) {
     if (!plans.length) out.innerHTML = `<p class="meta">No plans available right now.</p>`;
   } catch (e) {
     const plans = localPlans();
-    out.innerHTML = "";
+    out.innerHTML = `<div class="notice warn" style="grid-column:1/-1">Cannot reach the pricing API. Plan details below are local catalog copy; checkout is unavailable until a backend is connected.</div>`;
     plans.forEach((p) => {
       const cap = p.monthly_run_cap == null ? "Unlimited runs" : `${Number(p.monthly_run_cap).toLocaleString()} runs / mo`;
       const feature = p.id === "pro" ? " feature" : "";
@@ -833,10 +774,10 @@ async function startCheckout(planId, btn) {
         </ul>`;
       const btn = document.createElement("button");
       btn.className = "btn " + (buyable ? "btn-buy" : "btn-free");
-      btn.textContent = buyable ? `Get ${escapeHtml(p.name || p.id)}` : "Start free";
+      btn.textContent = buyable ? `Get ${p.name || p.id}` : "Start free";
       if (buyable) {
         btn.addEventListener("click", () => {
-          $("billingMsg").innerHTML = `<div class="notice warn">This share link is static. Connect a backend to start checkout.</div>`;
+          $("billingMsg").innerHTML = `<div class="notice warn">Cannot reach the billing API. Connect a backend before starting checkout.</div>`;
           $("email").focus();
         });
       } else {
