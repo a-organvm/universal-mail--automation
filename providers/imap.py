@@ -291,6 +291,18 @@ class IMAPProvider(EmailProvider):
                 logger.error(f"Failed to copy to folder {label}: {e}")
                 return False
 
+    def _server_supports(self, capability: str) -> bool:
+        """True iff the connected IMAP server advertised ``capability``.
+        imaplib populates ``connection.capabilities`` (a tuple of upper-case
+        names) at connect; match by exact token so e.g. ``UIDPLUS`` never
+        misfires on a bare ``UID``. Note this is the SERVER's capability set —
+        distinct from ``self.capabilities`` (the ProviderCapabilities flags)."""
+        conn = self._connection
+        caps = getattr(conn, "capabilities", None) if conn else None
+        if not caps:
+            return False
+        return capability.upper() in {str(c).upper() for c in caps}
+
     def remove_label(self, message_id: str, label: str) -> bool:
         """
         Remove a label from a message.
@@ -300,7 +312,15 @@ class IMAPProvider(EmailProvider):
         """
         if self.use_gmail_extensions:
             try:
-                self._connection.uid("STORE", message_id, "-X-GM-LABELS", f'"{label}"')
+                # Check the STORE result: a NO/BAD means the label removal was
+                # rejected, so we must NOT report success (review U086) — else
+                # archive() would record the message as having left the inbox.
+                res, _ = self._connection.uid(
+                    "STORE", message_id, "-X-GM-LABELS", f'"{label}"')
+                if res != "OK":
+                    logger.error(
+                        f"STORE -X-GM-LABELS {label} returned {res} for {message_id}")
+                    return False
                 return True
             except Exception as e:
                 logger.error(f"Failed to remove Gmail label {label}: {e}")
@@ -310,20 +330,56 @@ class IMAPProvider(EmailProvider):
             return False
 
     def archive(self, message_id: str) -> bool:
-        """Archive a message."""
+        """Archive a message.
+
+        Gmail extensions: drop the ``\\Inbox`` label (a true archive).
+
+        Standard IMAP: relocate to the Archive folder, reporting success ONLY
+        when the message actually LEFT the source mailbox — via atomic UID MOVE
+        (RFC 6851), or COPY + ``\\Deleted`` + scoped UID EXPUNGE (RFC 4315 /
+        UIDPLUS). It NEVER issues a mailbox-wide ``expunge()`` (which would
+        destroy unrelated ``\\Deleted`` mail), and it never reports success for a
+        message merely flagged ``\\Deleted``-but-still-present: clients hide such
+        messages so the old code looked like it archived while the caller
+        recorded ``did_leave_inbox=True`` for a message still in the inbox
+        (review U131)."""
         if self.use_gmail_extensions:
             return self.remove_label(message_id, "\\Inbox")
-        else:
-            # Standard IMAP: move to Archive folder (if exists)
-            try:
-                res, _ = self._connection.uid("COPY", message_id, '"Archive"')
-                if res == "OK":
-                    self._connection.uid("STORE", message_id, "+FLAGS", r"(\Deleted)")
-                    return True
+
+        try:
+            # Preferred: atomic, server-side UID MOVE. Trust its result and never
+            # fall through to COPY (a non-OK MOVE that did would duplicate).
+            if self._server_supports("MOVE"):
+                res, _ = self._connection.uid("MOVE", message_id, '"Archive"')
+                return res == "OK"
+
+            # Without MOVE we need UIDPLUS to expunge just this one message. With
+            # neither, the only removal primitive is a mailbox-wide EXPUNGE, which
+            # we refuse — so decline rather than leave the message copied + flagged
+            # \\Deleted (a dangling duplicate) while falsely claiming success.
+            if not self._server_supports("UIDPLUS"):
+                logger.warning(
+                    "archive: server advertises neither MOVE nor UIDPLUS; cannot "
+                    "safely relocate a single message without a mailbox-wide "
+                    "EXPUNGE — reporting not-archived (no changes made).")
                 return False
-            except Exception as e:
-                logger.error(f"Failed to archive message: {e}")
+
+            res, _ = self._connection.uid("COPY", message_id, '"Archive"')
+            if res != "OK":
+                return False  # nothing copied; original untouched
+            sres, _ = self._connection.uid(
+                "STORE", message_id, "+FLAGS", r"(\Deleted)")
+            if sres != "OK":
+                logger.error(
+                    f"archive: STORE \\Deleted returned {sres} for {message_id}; "
+                    "copy made but original not flagged — not archived.")
                 return False
+            # Scoped to THIS uid (UIDPLUS), not mailbox-wide.
+            eres, _ = self._connection.uid("EXPUNGE", message_id)
+            return eres == "OK"
+        except Exception as e:
+            logger.error(f"Failed to archive message: {e}")
+            return False
 
     def star(self, message_id: str, due_date: Any = None) -> bool:
         """Flag/star a message. due_date is ignored (IMAP doesn't support it)."""
