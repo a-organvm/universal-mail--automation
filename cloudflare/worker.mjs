@@ -358,10 +358,35 @@ export default {
     }
 
     if (url.pathname.startsWith("/v1/audit/") && request.method === "GET") {
+      // HONESTY (review U055): this share demo holds no signing key, so it
+      // must never present a receipt as "Signed" — the live API returns
+      // {signed_body, signature, algorithm: "HMAC-SHA256", verify} and an
+      // auditing agent verifies the HMAC. The demo says so explicitly
+      // (signed:false, signature:null) instead of shipping a label-only
+      // trust claim. It also mirrors the live API's 404 on unknown run_ids
+      // rather than fabricating a plausible receipt for ANY id.
       const runId = url.pathname.split("/").pop() || "demo";
+      const DEMO_RUN_IDS = new Set(["demo", "demo_preview", "demo_local_preview"]);
+      if (!DEMO_RUN_IDS.has(runId)) {
+        return json(
+          {
+            detail:
+              "receipt not found — this share demo only serves the sample " +
+              "run ids (demo_preview); the live API serves real, " +
+              "HMAC-SHA256-signed receipts for actual runs",
+          },
+          { status: 404 },
+        );
+      }
       return json({
         run_id: runId,
-        receipt: `Signed receipt for ${runId}`,
+        demo: true,
+        signed: false,
+        signature: null,
+        algorithm: null,
+        receipt:
+          `Demo receipt for ${runId} (UNSIGNED sample — the live API returns ` +
+          `an HMAC-SHA256 signed_body + signature an auditor can verify)`,
         dry_run: true,
         provider: "demo",
         audit: {
