@@ -1,4 +1,93 @@
-const PROTECTED = new Set(["courts.ca.gov", "chase.com", "1password.com"]);
+// Protected-sender domains — parity with core/rules.py EXAMPLE_PROTECTED_SENDERS.
+// The gate FAILS CLOSED and matches on a domain/subdomain BOUNDARY (never a raw
+// substring), so 'purchase.com' never matches 'chase.com' and
+// 'courts.ca.gov.evil.com' never matches a .gov rule.
+const PROTECTED = [
+  "docusign.net", // e-signature (legal docs)
+  "irs.gov", "ssa.gov", "studentaid.gov", "login.gov", // US government (also via .gov rule)
+  "apple.com", "appleid.com",
+  "google.com", "accounts.google.com", "anthropic.com",
+  "1password.com", "meta.com", "facebookmail.com",
+  "chase.com",
+  "example-lawfirm.com",
+  "example-bank.com", "alerts.example-bank.com",
+  "example-nonprofit.org",
+];
+// Subset routed to the Finance/Banking critical bucket.
+const FINANCE = ["chase.com", "example-bank.com", "alerts.example-bank.com"];
+
+// Boundary match: equality OR proper subdomain. Kills substring embeds
+// ('purchase.com' != 'chase.com') and left-label spoofs.
+function domainMatches(domain, entry) {
+  return domain === entry || domain.endsWith("." + entry);
+}
+
+// US .gov only, anchored to the TERMINAL label of the recovered domain:
+// 'irs.gov' -> true; 'irs.gov.attacker.com' -> false; 'service.gov.uk' -> false.
+function govProtected(domain) {
+  return domain.length > 0 && domain.split(".").pop() === "gov";
+}
+
+function isProtectedDomain(domain) {
+  if (!domain) return false;
+  if (govProtected(domain)) return true;
+  return PROTECTED.some((entry) => domainMatches(domain, entry));
+}
+
+// Strip RFC-5322 CFWS comments "(...)" (innermost first, bounded) so a domain
+// comment like 'irs(x).gov' collapses to 'irs.gov' the way the production engine's
+// parser (email.utils.getaddresses) recovers it — rather than truncating to 'irs'.
+function stripComments(s) {
+  let out = String(s);
+  for (let i = 0; i < 8; i++) {
+    const next = out.replace(/\([^()]*\)/g, "");
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+// Recover the domain of EVERY address in the header (the UNION), regardless of
+// separator (comma, semicolon, whitespace) or angle brackets, so a protected
+// address listed ANYWHERE can't escape. A protected domain mentioned in a display
+// name is also counted — that can only ADD protection (the safe direction).
+// Plain-text only: unlike the production engine (core/rules.py) this demo gate
+// does NOT MIME-decode (=?utf-8?..?=) or resolve iCloud relay local-parts; an
+// undecodable header yields no address, so the caller FAILS CLOSED (held).
+function senderDomains(sender) {
+  const raw = stripComments(String(sender || "").toLowerCase());
+  const domains = [];
+  const re = /@([a-z0-9.-]+)/g; // the domain of each address, any separator/bracket
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const domain = m[1].replace(/\.+$/, ""); // strip trailing dot(s)
+    if (domain) domains.push(domain);
+  }
+  return domains;
+}
+
+// True when the header can't be CLEANLY parsed into addresses: a domain split by
+// folded/internal whitespace ('a@irs .gov'), or an '@' that can't be attached to a
+// clean domain (stray '@', or folding WSP after '@'). The production engine would
+// recover a possibly-protected sender from these, so this demo gate FAILS CLOSED
+// on the ambiguity rather than archiving a truncated, non-matching fragment.
+function headerIsAmbiguous(sender) {
+  const raw = stripComments(String(sender || "").toLowerCase());
+  const atCount = (raw.match(/@/g) || []).length;
+  // A multi-address header with no comma is a malformed address list: the engine's
+  // RFC parser (getaddresses) can't split it and fails closed, so we do too. (A
+  // protected member is already matched before this point, so this only holds
+  // genuinely-unprotected malformed headers — the safe direction.)
+  if (atCount >= 2 && !raw.includes(",")) return true;
+  let clean = 0;
+  const re = /@([a-z0-9.-]+)/g;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    clean++;
+    if (/^\s+\./.test(raw.slice(re.lastIndex))) return true; // 'irs .gov' (folded domain)
+  }
+  return atCount > clean; // an '@' with no cleanly-recoverable domain
+}
 
 const PLANS = [
   {
@@ -79,9 +168,41 @@ function text(body, init = {}) {
   });
 }
 
+// Tier-1 "Critical, held in inbox" categorization for a protected sender.
+function protectedCategorization(label) {
+  return {
+    label,
+    tier: 1,
+    time_sensitive: true,
+    tier_config: {
+      number: 1,
+      name: "Critical",
+      color: "red",
+      folder: "Action/Critical",
+      keep_in_inbox: true,
+      star: true,
+    },
+    is_vip: false,
+    vip_note: "",
+  };
+}
+
 function senderCheck(sender) {
-  const value = String(sender || "").trim().toLowerCase();
-  if (!value) {
+  const domains = senderDomains(sender);
+
+  // Protected if ANY recovered address is protected (union, matching the engine).
+  const protectedDomain = domains.find(isProtectedDomain);
+  if (protectedDomain) {
+    let label = "Personal/Important";
+    if (govProtected(protectedDomain)) label = "Personal/Government";
+    else if (FINANCE.some((entry) => domainMatches(protectedDomain, entry))) label = "Finance/Banking";
+    return { sender, protected: true, categorization: protectedCategorization(label) };
+  }
+
+  // FAIL CLOSED: no recoverable address, OR a header we can't cleanly parse (folded
+  // whitespace in a domain, stray '@') that the engine might resolve to a protected
+  // sender. Held in the inbox at low priority rather than archived.
+  if (domains.length === 0 || headerIsAmbiguous(sender)) {
     return {
       sender,
       protected: true,
@@ -94,7 +215,7 @@ function senderCheck(sender) {
           name: "Reference",
           color: "green",
           folder: null,
-          keep_in_inbox: false,
+          keep_in_inbox: true, // fail closed: held because the sender is unidentifiable
           star: false,
         },
         is_vip: false,
@@ -103,54 +224,12 @@ function senderCheck(sender) {
     };
   }
 
-  if (value.includes("courts.ca.gov") || value.endsWith(".gov")) {
-    return {
-      sender,
-      protected: true,
-      categorization: {
-        label: "Personal/Government",
-        tier: 1,
-        time_sensitive: true,
-        tier_config: {
-          number: 1,
-          name: "Critical",
-          color: "red",
-          folder: "Action/Critical",
-          keep_in_inbox: true,
-          star: true,
-        },
-        is_vip: false,
-        vip_note: "",
-      },
-    };
-  }
-
-  if (value.includes("chase.com")) {
-    return {
-      sender,
-      protected: true,
-      categorization: {
-        label: "Finance/Banking",
-        tier: 1,
-        time_sensitive: true,
-        tier_config: {
-          number: 1,
-          name: "Critical",
-          color: "red",
-          folder: "Action/Critical",
-          keep_in_inbox: true,
-          star: true,
-        },
-        is_vip: false,
-        vip_note: "",
-      },
-    };
-  }
-
+  // Not protected -> ordinary demo categorization (subject/marketing heuristic unchanged).
+  const value = String(sender || "").toLowerCase();
   const marketing = value.includes("deal") || value.includes("news");
   return {
     sender,
-    protected: value.includes("chase.com") || value.includes("1password.com"),
+    protected: false,
     categorization: {
       label: marketing ? "Marketing" : "Misc/Other",
       tier: marketing ? 3 : 4,
@@ -320,3 +399,7 @@ export default {
     return serveApp(request, env);
   },
 };
+
+// Named exports for unit testing the protected-sender gate. The Cloudflare
+// Worker runtime only consumes the default export above; these are inert there.
+export { senderCheck, senderDomains, isProtectedDomain, domainMatches, govProtected };
