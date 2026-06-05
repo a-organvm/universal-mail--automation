@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Premortem Report - Universal Mail Automation Safe Cleanup Launch</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --panel: #111827;
+    --panel2: #151f31;
+    --ink: #eef4ff;
+    --muted: #a8b3c7;
+    --line: rgba(255,255,255,.12);
+    --red: #fb7185;
+    --amber: #fbbf24;
+    --blue: #60a5fa;
+    --green: #34d399;
+    --violet: #a78bfa;
+    --cyan: #22d3ee;
+    --orange: #fb923c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(circle at top left, rgba(96,165,250,.16), transparent 34rem), var(--bg);
+    color: var(--ink);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Arial, sans-serif;
+  }
+  main { max-width: 1180px; margin: 0 auto; padding: 42px 20px 56px; }
+  header { margin-bottom: 26px; }
+  .eyebrow { color: var(--cyan); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; font-weight: 800; }
+  h1 { margin: 8px 0 10px; font-size: clamp(34px, 5vw, 58px); line-height: 1; letter-spacing: -.035em; }
+  .lede { color: var(--muted); max-width: 78ch; font-size: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .grid, .grid2 { grid-template-columns: 1fr; } }
+  .card {
+    background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02)), var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px;
+    box-shadow: 0 18px 52px rgba(0,0,0,.22);
+  }
+  .card h2, .card h3 { margin: 0 0 8px; line-height: 1.12; letter-spacing: -.02em; }
+  .card p { margin: 8px 0 0; color: var(--muted); }
+  .synthesis { margin: 24px 0; }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 10px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .accent-red { border-top: 4px solid var(--red); }
+  .accent-amber { border-top: 4px solid var(--amber); }
+  .accent-blue { border-top: 4px solid var(--blue); }
+  .accent-green { border-top: 4px solid var(--green); }
+  .accent-violet { border-top: 4px solid var(--violet); }
+  .accent-cyan { border-top: 4px solid var(--cyan); }
+  .accent-orange { border-top: 4px solid var(--orange); }
+  .meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .pill { border-radius: 999px; padding: 4px 9px; background: rgba(255,255,255,.08); color: var(--muted); font-size: 12px; font-weight: 700; }
+  .section-title { margin: 34px 0 14px; font-size: 24px; letter-spacing: -.025em; }
+  ol, ul { color: var(--muted); padding-left: 20px; }
+  li { margin: 7px 0; }
+  strong { color: var(--ink); }
+  footer { color: var(--muted); border-top: 1px solid var(--line); margin-top: 34px; padding-top: 18px; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Premortem Report</div>
+    <h1>UMA safe cleanup launch failed.</h1>
+    <p class="lede">Premise: it is six months from now. The clearer "clean your inbox without losing important email" launch shipped, but it did not become a durable product. This report explains how it died and what to change before launch.</p>
+    <div class="meta">
+      <span class="pill">7 failure agents</span>
+      <span class="pill">Generated 2026-06-02 12:51:21 -04:00</span>
+      <span class="pill">Target: safe inbox cleanup with proof</span>
+    </div>
+  </header>
+
+  <section class="synthesis grid2">
+    <article class="card accent-red">
+      <span class="tag">Most likely</span>
+      <h2>Offer confusion</h2>
+      <p>The buyer understands the safer story but still cannot tell whether the first transaction is self-serve cleanup, concierge cleanup, or a protected-sender audit. The page becomes clearer but the purchase remains fuzzy.</p>
+    </article>
+    <article class="card accent-amber">
+      <span class="tag">Most dangerous</span>
+      <h2>Liability without guardrails</h2>
+      <p>The strongest pitch names court, bank, government, and account mail. Without backups, reversibility, support policy, and careful claim boundaries, one confused user can make the whole launch feel unsafe to scale.</p>
+    </article>
+    <article class="card accent-violet">
+      <span class="tag">Hidden assumption</span>
+      <h2>"Safe inbox cleanup" is one product</h2>
+      <p>It is actually a family of products. The first sellable version must choose a trust posture: self-serve tool, human-assisted service, or audit-only proof report.</p>
+    </article>
+    <article class="card accent-green">
+      <span class="tag">Most important revision</span>
+      <h2>Launch protected audit first</h2>
+      <p>Start with a non-destructive Protected Inbox Audit: identify protected senders, risky categories, cleanup readiness, and a receipt-style report before offering autonomous cleanup.</p>
+    </article>
+  </section>
+
+  <h2 class="section-title">Revised Plan</h2>
+  <section class="card">
+    <ol>
+      <li><strong>Launch a narrow first offer:</strong> Protected Inbox Audit before full cleanup. No destructive mailbox action.</li>
+      <li><strong>Add a reversible adoption path:</strong> dry run, export or backup, human approval, then cleanup.</li>
+      <li><strong>Rewrite the demo around a full scenario:</strong> show sample messages as stays, moves, and needs review, then show the receipt.</li>
+      <li><strong>Move MCP, ACP, and agents behind Advanced:</strong> one buyer job on the main path.</li>
+      <li><strong>Replace absolute claims in sensitive contexts:</strong> pair safety language with exact rules and boundaries.</li>
+      <li><strong>Choose a first buyer wedge:</strong> founders/operators facing cleanup, migration, legal/admin review, or tax/accounting handoff.</li>
+    </ol>
+  </section>
+
+  <h2 class="section-title">Pre-Launch Checklist</h2>
+  <section class="grid">
+    <article class="card"><h3>One sentence</h3><p>Can a stranger explain the product and name the first thing they would buy?</p></article>
+    <article class="card"><h3>Whole demo</h3><p>Does the demo show a cleanup decision, not only a protected sender check?</p></article>
+    <article class="card"><h3>Risk boundary</h3><p>Is every safety claim paired with dry-run, backup, approval, reversibility, or support policy?</p></article>
+    <article class="card"><h3>One CTA</h3><p>Is there exactly one primary call to action on the buyer path?</p></article>
+    <article class="card"><h3>Platform parked</h3><p>Are agent/platform features removed from the main buyer path until after the core offer lands?</p></article>
+  </section>
+
+  <h2 class="section-title">Failure Agents</h2>
+  <section class="grid">
+    <article class="card accent-blue">
+      <h3>1. Simple copy, vague buyer</h3>
+      <p>The page gets easier to understand, but "people with messy inboxes" is not a purchase-ready segment. People nod and do not buy because no event forces action today.</p>
+      <p><strong>Assumption:</strong> a universal pain automatically becomes a market.</p>
+      <p><strong>Signals:</strong> demo clicks without pricing clicks; "makes sense" feedback without mailbox-connection questions.</p>
+    </article>
+    <article class="card accent-red">
+      <h3>2. Email trust barrier</h3>
+      <p>The safer the pitch sounds, the more buyers realize the stakes. They want reversible mode, human approval, backup, or a low-risk first step before granting access.</p>
+      <p><strong>Assumption:</strong> proof language alone can overcome trust.</p>
+      <p><strong>Signals:</strong> permission questions come before price; buyers only want to test secondary inboxes.</p>
+    </article>
+    <article class="card accent-cyan">
+      <h3>3. Demo mismatch</h3>
+      <p>The demo proves the sender gate but not the whole cleanup job. Buyers still ask what would actually happen to their own inbox.</p>
+      <p><strong>Assumption:</strong> proving the invariant demonstrates the product.</p>
+      <p><strong>Signals:</strong> users stop after sender check; repeated "what does it move?" questions.</p>
+    </article>
+    <article class="card accent-amber">
+      <h3>4. Liability without guardrails</h3>
+      <p>The product enters high-consequence territory without defining responsibility boundaries. Even one confused support case can chill the launch.</p>
+      <p><strong>Assumption:</strong> technical safety can be marketed before service policy exists.</p>
+      <p><strong>Signals:</strong> copy stalls on "never" and "safe"; prospects ask about guarantees and backups.</p>
+    </article>
+    <article class="card accent-green">
+      <h3>5. Offer confusion</h3>
+      <p>Self-serve, concierge, audit, subscription, agent access, and receipts all compete. The buyer cannot identify the first transaction.</p>
+      <p><strong>Assumption:</strong> the page can sell before the offer shape is narrowed.</p>
+      <p><strong>Signals:</strong> CTA rewrites keep failing; prospects ask what they actually get first.</p>
+    </article>
+    <article class="card accent-violet">
+      <h3>6. Platform overhang</h3>
+      <p>MCP, ACP, providers, and architecture keep leaking into the buyer path. Technical reviewers like it, buyers tire out.</p>
+      <p><strong>Assumption:</strong> technical completeness reinforces buyer trust.</p>
+      <p><strong>Signals:</strong> depth is praised more than need; new sections appear before purchase data.</p>
+    </article>
+    <article class="card accent-orange">
+      <h3>7. Reachability mismatch</h3>
+      <p>The real buyers are narrower than "chaotic inbox" people: founders, litigants, lawyers, admins, compliance-adjacent operators, and overloaded solos.</p>
+      <p><strong>Assumption:</strong> the right buyers will recognize themselves in general inbox-cleanup language.</p>
+      <p><strong>Signals:</strong> warm feedback from generalists; low-willingness productivity users show up first.</p>
+    </article>
+  </section>
+
+  <footer>
+    Premortem target: Universal Mail Automation safe inbox cleanup launch. Transcript: premortem-transcript-20260602-125121.md.
+  </footer>
+</main>
+</body>
+</html>
