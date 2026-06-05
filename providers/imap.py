@@ -275,12 +275,9 @@ class IMAPProvider(EmailProvider):
         For standard IMAP: Copies message to folder.
         """
         if self.use_gmail_extensions:
-            try:
-                self._connection.uid("STORE", message_id, "+X-GM-LABELS", f'"{label}"')
-                return True
-            except Exception as e:
-                logger.error(f"Failed to apply Gmail label {label}: {e}")
-                return False
+            return self._checked_store(
+                message_id, "+X-GM-LABELS", f'"{label}"',
+                f"apply Gmail label {label}")
         else:
             # Standard IMAP: copy to folder
             self.ensure_label_exists(label)
@@ -291,6 +288,38 @@ class IMAPProvider(EmailProvider):
                 logger.error(f"Failed to copy to folder {label}: {e}")
                 return False
 
+    def _checked_store(self, message_id: str, op: str, value: str,
+                       what: str) -> bool:
+        """Issue ``UID STORE`` and return True ONLY on an ``OK`` response.
+
+        imaplib raises only on ``BAD``; a server ``NO`` (label missing,
+        permission, quota, read-only mailbox, invalid flag) comes back as a
+        normal ``('NO', ...)`` tuple. Returning True unconditionally reported
+        those rejections as success and they entered the audit as applied
+        (review U085) — so every flag/label mutation routes through here."""
+        try:
+            res, _ = self._connection.uid("STORE", message_id, op, value)
+            if res != "OK":
+                logger.error(
+                    f"Failed to {what}: STORE returned {res} for {message_id}")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Failed to {what}: {e}")
+            return False
+
+    def _server_supports(self, capability: str) -> bool:
+        """True iff the connected IMAP server advertised ``capability``.
+        imaplib populates ``connection.capabilities`` (a tuple of upper-case
+        names) at connect; match by exact token so e.g. ``UIDPLUS`` never
+        misfires on a bare ``UID``. Note this is the SERVER's capability set —
+        distinct from ``self.capabilities`` (the ProviderCapabilities flags)."""
+        conn = self._connection
+        caps = getattr(conn, "capabilities", None) if conn else None
+        if not caps:
+            return False
+        return capability.upper() in {str(c).upper() for c in caps}
+
     def remove_label(self, message_id: str, label: str) -> bool:
         """
         Remove a label from a message.
@@ -299,49 +328,77 @@ class IMAPProvider(EmailProvider):
         For standard IMAP: Not directly supported (would need move).
         """
         if self.use_gmail_extensions:
-            try:
-                self._connection.uid("STORE", message_id, "-X-GM-LABELS", f'"{label}"')
-                return True
-            except Exception as e:
-                logger.error(f"Failed to remove Gmail label {label}: {e}")
-                return False
+            # The STORE result must be honoured: a NO means the label removal
+            # was rejected, so we must NOT report success (review U086) — else
+            # archive() would record the message as having left the inbox.
+            return self._checked_store(
+                message_id, "-X-GM-LABELS", f'"{label}"',
+                f"remove Gmail label {label}")
         else:
             logger.warning("remove_label not supported for standard IMAP (folder-based)")
             return False
 
     def archive(self, message_id: str) -> bool:
-        """Archive a message."""
+        """Archive a message.
+
+        Gmail extensions: drop the ``\\Inbox`` label (a true archive).
+
+        Standard IMAP: relocate to the Archive folder, reporting success ONLY
+        when the message actually LEFT the source mailbox — via atomic UID MOVE
+        (RFC 6851), or COPY + ``\\Deleted`` + scoped UID EXPUNGE (RFC 4315 /
+        UIDPLUS). It NEVER issues a mailbox-wide ``expunge()`` (which would
+        destroy unrelated ``\\Deleted`` mail), and it never reports success for a
+        message merely flagged ``\\Deleted``-but-still-present: clients hide such
+        messages so the old code looked like it archived while the caller
+        recorded ``did_leave_inbox=True`` for a message still in the inbox
+        (review U131)."""
         if self.use_gmail_extensions:
             return self.remove_label(message_id, "\\Inbox")
-        else:
-            # Standard IMAP: move to Archive folder (if exists)
-            try:
-                res, _ = self._connection.uid("COPY", message_id, '"Archive"')
-                if res == "OK":
-                    self._connection.uid("STORE", message_id, "+FLAGS", r"(\Deleted)")
-                    return True
+
+        try:
+            # Preferred: atomic, server-side UID MOVE. Trust its result and never
+            # fall through to COPY (a non-OK MOVE that did would duplicate).
+            if self._server_supports("MOVE"):
+                res, _ = self._connection.uid("MOVE", message_id, '"Archive"')
+                return res == "OK"
+
+            # Without MOVE we need UIDPLUS to expunge just this one message. With
+            # neither, the only removal primitive is a mailbox-wide EXPUNGE, which
+            # we refuse — so decline rather than leave the message copied + flagged
+            # \\Deleted (a dangling duplicate) while falsely claiming success.
+            if not self._server_supports("UIDPLUS"):
+                logger.warning(
+                    "archive: server advertises neither MOVE nor UIDPLUS; cannot "
+                    "safely relocate a single message without a mailbox-wide "
+                    "EXPUNGE — reporting not-archived (no changes made).")
                 return False
-            except Exception as e:
-                logger.error(f"Failed to archive message: {e}")
+
+            res, _ = self._connection.uid("COPY", message_id, '"Archive"')
+            if res != "OK":
+                return False  # nothing copied; original untouched
+            sres, _ = self._connection.uid(
+                "STORE", message_id, "+FLAGS", r"(\Deleted)")
+            if sres != "OK":
+                logger.error(
+                    f"archive: STORE \\Deleted returned {sres} for {message_id}; "
+                    "copy made but original not flagged — not archived.")
                 return False
+            # Scoped to THIS uid (UIDPLUS), not mailbox-wide.
+            eres, _ = self._connection.uid("EXPUNGE", message_id)
+            return eres == "OK"
+        except Exception as e:
+            logger.error(f"Failed to archive message: {e}")
+            return False
 
     def star(self, message_id: str, due_date: Any = None) -> bool:
         """Flag/star a message. due_date is ignored (IMAP doesn't support it)."""
-        try:
-            self._connection.uid("STORE", message_id, "+FLAGS", r"(\Flagged)")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to star message: {e}")
-            return False
+        return self._checked_store(
+            message_id, "+FLAGS", r"(\Flagged)", "star message")
 
     def unstar(self, message_id: str) -> bool:
         """Remove flag/star from a message."""
-        try:
-            self._connection.uid("STORE", message_id, "-FLAGS", r"(\Flagged)")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to unstar message: {e}")
-            return False
+        return self._checked_store(
+            message_id, "-FLAGS", r"(\Flagged)", "unstar message")
 
     def ensure_label_exists(self, label: str) -> str:
         """Ensure folder exists, creating if necessary."""
@@ -360,18 +417,10 @@ class IMAPProvider(EmailProvider):
 
     def mark_read(self, message_id: str) -> bool:
         """Mark message as read."""
-        try:
-            self._connection.uid("STORE", message_id, "+FLAGS", r"(\Seen)")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to mark read: {e}")
-            return False
+        return self._checked_store(
+            message_id, "+FLAGS", r"(\Seen)", "mark read")
 
     def mark_unread(self, message_id: str) -> bool:
         """Mark message as unread."""
-        try:
-            self._connection.uid("STORE", message_id, "-FLAGS", r"(\Seen)")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to mark unread: {e}")
-            return False
+        return self._checked_store(
+            message_id, "-FLAGS", r"(\Seen)", "mark unread")

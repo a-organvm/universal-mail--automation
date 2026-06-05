@@ -406,3 +406,70 @@ class TestProtectedSenderGate:
 
     def test_display_name_never_protects(self):
         assert is_protected_sender('"alerts@example-bank.com" <attacker@evil.io>') is False
+
+
+class TestGovernmentPriorityAndTieBreak:
+    """Reviews U064/U065: government mail must categorize as tier-1 Critical.
+
+    U065: irs.gov appeared in both Finance/Tax (priority 8) and
+    Personal/Government (old priority 17) — the lower number won, demoting an
+    actual IRS notice to tier 2. U064: same-priority ties were resolved by
+    dict-insertion order, so an ssa.gov notice containing any bulk-mail
+    keyword fell to Marketing (tier 4).
+    """
+
+    def test_irs_gov_is_government_critical_not_finance_tax(self):
+        # The exact U065 reproduction.
+        res = categorize_with_tier("IRS <noreply@irs.gov>", "Your tax refund status")
+        assert res.label == "Personal/Government"
+        assert res.tier == 1
+
+    def test_ssa_gov_with_bulk_mail_keywords_stays_government(self):
+        # The exact U064 reproduction: 'newsletter'/'unsubscribe' must not
+        # demote a government sender to Marketing.
+        res = categorize_with_tier(
+            "Benefits <noreply@ssa.gov>",
+            "newsletter: your benefits statement — unsubscribe here")
+        assert res.label == "Personal/Government"
+        assert res.tier == 1
+
+    def test_tax_software_vendors_still_finance_tax(self):
+        # Removing irs.gov from Finance/Tax must not orphan the vendor rules.
+        for sender in ("TurboTax <no-reply@intuit.com>",
+                       "H&R Block <offers@hrblock.com>"):
+            res = categorize_with_tier(sender, "Your tax return is ready")
+            assert res.label == "Finance/Tax", sender
+
+    def test_plain_marketing_still_marketing(self):
+        res = categorize_with_tier(
+            "Shop <deals@retailer-example.com>",
+            "newsletter: special offer just for you — unsubscribe")
+        assert res.label == "Marketing"
+        assert res.tier == 4
+
+    def test_equal_priority_tie_breaks_on_tier_not_insertion_order(self):
+        # General U064 guard, independent of the Personal/Government reprioritization:
+        # among rules with the SAME priority, the more critical tier must win
+        # regardless of where it sits in the dict.
+        import core.rules as rules_mod
+        try:
+            rules_mod.LABEL_RULES["ZZZ/TestLow"] = {
+                "patterns": [r"tiebreakprobe"], "priority": 555, "tier": 4,
+                "time_sensitive": False,
+            }
+            rules_mod.LABEL_RULES["ZZZ/TestHigh"] = {
+                "patterns": [r"tiebreakprobe"], "priority": 555, "tier": 1,
+                "time_sensitive": False,
+            }
+            # tier-4 rule was inserted FIRST; tier-1 must still win the tie.
+            assert _find_best_label("tiebreakprobe") == "ZZZ/TestHigh"
+        finally:
+            rules_mod.LABEL_RULES.pop("ZZZ/TestLow", None)
+            rules_mod.LABEL_RULES.pop("ZZZ/TestHigh", None)
+
+    def test_government_does_not_steal_dev_mail(self):
+        # Priority 4 sits below the Dev rules; a normal GitHub notification
+        # must remain Dev/GitHub.
+        res = categorize_with_tier(
+            "GitHub <notifications@github.com>", "PR review requested")
+        assert res.label == "Dev/GitHub"
