@@ -135,3 +135,62 @@ def test_standard_archive_no_move_no_uidplus_reports_false_without_mutating():
 def test_standard_archive_exception_is_false():
     conn = FakeConn(capabilities=("MOVE",), raise_on=("MOVE",))
     assert _provider(conn=conn).archive("9") is False
+
+
+# -- U085: every flag/label STORE honours the server's NO -------------------
+# imaplib raises only on BAD; a server NO (quota, ACL, read-only mailbox,
+# invalid flag) is a normal ('NO', ...) tuple. These methods used to return
+# True unconditionally, so rejections entered the audit as applied.
+_STORE_METHODS = [
+    # (method-name, args, gmail_ext)
+    ("apply_label", ("1", "Work"), True),
+    ("remove_label", ("1", "Work"), True),
+    ("star", ("1",), False),
+    ("unstar", ("1",), False),
+    ("mark_read", ("1",), False),
+    ("mark_unread", ("1",), False),
+]
+
+
+@pytest.mark.parametrize("method,args,gmail_ext", _STORE_METHODS)
+def test_store_method_false_when_server_says_no(method, args, gmail_ext):
+    conn = FakeConn(results={"STORE": "NO"})
+    assert getattr(_provider(gmail_ext=gmail_ext, conn=conn), method)(*args) is False
+
+
+@pytest.mark.parametrize("method,args,gmail_ext", _STORE_METHODS)
+def test_store_method_true_when_server_says_ok(method, args, gmail_ext):
+    conn = FakeConn()
+    assert getattr(_provider(gmail_ext=gmail_ext, conn=conn), method)(*args) is True
+    assert conn.cmds() == ["STORE"]
+
+
+@pytest.mark.parametrize("method,args,gmail_ext", _STORE_METHODS)
+def test_store_method_false_on_exception(method, args, gmail_ext):
+    conn = FakeConn(raise_on=("STORE",))
+    assert getattr(_provider(gmail_ext=gmail_ext, conn=conn), method)(*args) is False
+
+
+def test_store_flag_payloads_are_correct():
+    # The refactor through _checked_store must not alter the wire arguments.
+    cases = [
+        ("star", ("7",), ("STORE", "7", "+FLAGS", r"(\Flagged)")),
+        ("unstar", ("7",), ("STORE", "7", "-FLAGS", r"(\Flagged)")),
+        ("mark_read", ("7",), ("STORE", "7", "+FLAGS", r"(\Seen)")),
+        ("mark_unread", ("7",), ("STORE", "7", "-FLAGS", r"(\Seen)")),
+    ]
+    for method, args, expected in cases:
+        conn = FakeConn()
+        getattr(_provider(conn=conn), method)(*args)
+        assert conn.calls == [expected], method
+
+
+def test_gmail_label_store_payloads_are_correct():
+    conn = FakeConn()
+    p = _provider(gmail_ext=True, conn=conn)
+    p.apply_label("7", "Work/Dev")
+    p.remove_label("7", "Work/Dev")
+    assert conn.calls == [
+        ("STORE", "7", "+X-GM-LABELS", '"Work/Dev"'),
+        ("STORE", "7", "-X-GM-LABELS", '"Work/Dev"'),
+    ]
