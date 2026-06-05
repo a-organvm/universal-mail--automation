@@ -3,314 +3,721 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Universal Mail Automation — clean your inbox, prove you never touched what matters</title>
-<meta name="description" content="Automated multi-provider inbox triage with a fail-closed protected-sender gate and a signed, re-derivable audit receipt. Gmail, Outlook, iCloud, IMAP." />
+<title>Universal Mail Automation - Protected Inbox Audit</title>
+<meta name="description" content="A non-destructive inbox risk check for protected senders, payment trails, legal notices, and client messages across Gmail, Outlook, iCloud, and IMAP." />
 <style>
   :root {
-    --ink: #101828;
-    --muted: #526071;
-    --line: #d9e1e8;
-    --bg: #eef2f5;
-    --surface: #fbfcfe;
-    --surface-2: #ffffff;
-    --hero: #0b1320;
-    --hero-2: #122238;
-    --accent: #0f766e;
-    --accent-2: #1f6feb;
-    --accent-soft: #ddf4f1;
-    --accent-soft-2: #dbeafe;
-    --red: #b42318;
-    --red-soft: #fce7e5;
-    --amber: #9a6700;
-    --amber-soft: #fff6df;
-    --shadow: 0 1px 2px rgba(16,24,40,.04), 0 20px 60px rgba(16,24,40,.08);
-    --radius: 16px;
+    color-scheme: light;
+    --bg: #f7f9fb;
+    --paper: #ffffff;
+    --paper-2: #f1f5f8;
+    --ink: #11161c;
+    --muted: #5b6673;
+    --quiet: #8793a0;
+    --line: #dfe6ec;
+    --line-strong: #c7d1db;
+    --accent: #00a7b5;
+    --accent-strong: #007c86;
+    --accent-soft: #e4fbfd;
+    --risk: #c26a18;
+    --risk-soft: #fff2df;
+    --ok: #0e7f62;
+    --ok-soft: #e5f8f2;
+    --danger: #b42318;
+    --danger-soft: #fde9e7;
+    --shadow: 0 18px 50px rgba(17, 22, 28, .08);
+    --radius: 8px;
+    --ease: cubic-bezier(.22, 1, .36, 1);
   }
+
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    margin: 0;
+    background:
+      radial-gradient(circle at 82% 8%, rgba(0, 167, 181, .11), transparent 28rem),
+      linear-gradient(180deg, #fff 0%, var(--bg) 44%, #fff 100%);
+    color: var(--ink);
+    font: 15px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
+
   body::before {
     content: "";
     position: fixed;
     inset: 0;
+    z-index: -1;
     pointer-events: none;
     background:
-      linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0) 12vh),
-      repeating-linear-gradient(90deg, rgba(16,24,40,.03) 0 1px, transparent 1px 84px),
-      repeating-linear-gradient(0deg, rgba(16,24,40,.025) 0 1px, transparent 1px 84px);
-    mask-image: linear-gradient(180deg, rgba(0,0,0,.9), rgba(0,0,0,.1) 70%, transparent 100%);
-    opacity: .36;
-    z-index: -1;
+      linear-gradient(90deg, rgba(17, 22, 28, .035) 1px, transparent 1px),
+      linear-gradient(180deg, rgba(17, 22, 28, .028) 1px, transparent 1px);
+    background-size: 88px 88px;
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, .72), rgba(0, 0, 0, .05) 70%, transparent);
   }
-  a { color: var(--green); }
-  a { color: var(--accent); }
-  .wrap { max-width: 1140px; margin: 0 auto; padding: 0 20px; }
-  .narrow { max-width: 820px; }
+
+  a { color: var(--accent-strong); }
+  button, input, select { font: inherit; }
+  button { cursor: pointer; }
+  .wrap { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
   .skip {
     position: absolute;
     left: -999px;
     top: 12px;
     z-index: 100;
     padding: 10px 14px;
-    border-radius: 999px;
-    background: #fff;
-    color: var(--ink);
     border: 1px solid var(--line);
+    background: var(--paper);
+    color: var(--ink);
+    border-radius: var(--radius);
   }
   .skip:focus { left: 20px; }
-  :focus-visible {
-    outline: 3px solid rgba(15,118,110,.22);
-    outline-offset: 2px;
-  }
+  :focus-visible { outline: 3px solid rgba(0, 167, 181, .26); outline-offset: 2px; }
 
-  /* nav */
   nav {
-    position: sticky; top: 0; z-index: 50;
-    background: rgba(255,255,255,.78);
-    backdrop-filter: saturate(140%) blur(16px);
-    border-bottom: 1px solid rgba(217,225,232,.85);
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    border-bottom: 1px solid rgba(223, 230, 236, .82);
+    background: rgba(255, 255, 255, .82);
+    backdrop-filter: blur(18px) saturate(140%);
   }
-  nav .bar { display: flex; align-items: center; gap: 18px; min-height: 64px; }
-  nav .brand { font-weight: 800; letter-spacing: -.03em; color: var(--ink); text-decoration: none; font-size: 16px; display:flex; align-items:center; gap:8px; }
-  nav .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
-  nav .links { display: flex; gap: 18px; margin-left: auto; align-items: center; }
-  nav .links a { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 600; }
-  nav .links a:hover { color: var(--ink); }
-  nav .links a.cta { background: var(--ink); color: #fff; padding: 9px 14px; border-radius: 999px; }
-  @media (max-width: 720px){ nav .links a:not(.cta){ display:none; } }
+  .bar { min-height: 66px; display: flex; align-items: center; gap: 22px; }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 760;
+  }
+  .brand-mark {
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--accent);
+    border-radius: 7px;
+    display: grid;
+    place-items: center;
+    position: relative;
+  }
+  .brand-mark::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--accent);
+    border-top: 0;
+    border-radius: 1px 1px 5px 5px;
+    transform: translateY(1px);
+  }
+  .links { margin-left: auto; display: flex; align-items: center; gap: 22px; }
+  .links a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 690;
+  }
+  .links a:hover { color: var(--ink); }
 
-  /* hero */
-  .hero {
-    color: #fff;
-    padding: 64px 0 76px;
-    background:
-      linear-gradient(180deg, rgba(11,19,32,.92), rgba(11,19,32,.86)),
-      linear-gradient(120deg, var(--hero) 0%, #0d1726 45%, var(--hero-2) 100%);
-    border-bottom: 1px solid rgba(255,255,255,.08);
+  .btn {
+    min-height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    padding: 0 16px;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 760;
+    transition: transform .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease), color .18s var(--ease);
   }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--accent); color: #061216; border-color: var(--accent); }
+  .btn-primary:hover { background: #11bfd0; border-color: #11bfd0; }
+  .btn-secondary { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent-strong); }
+  .links .btn { min-height: 38px; padding: 0 14px; }
+
+  .hero { padding: 76px 0 38px; }
   .hero-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr);
-    gap: 28px;
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 490px);
+    gap: clamp(32px, 6vw, 76px);
     align-items: start;
   }
-  @media (max-width: 920px){ .hero-grid { grid-template-columns: 1fr; } }
   .hero h1 {
-    font-size: clamp(40px, 5vw, 64px);
+    margin: 0;
+    max-width: 780px;
+    font-size: clamp(44px, 6.4vw, 86px);
     line-height: .96;
-    letter-spacing: -.045em;
-    margin: 12px 0 16px;
-    max-width: 13ch;
+    font-weight: 820;
+    letter-spacing: 0;
+    white-space: nowrap;
   }
-  .hero p.lede { font-size: 18px; opacity: .92; margin: 0 0 24px; max-width: 60ch; color: rgba(255,255,255,.86); }
-  .hero .ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
-  .btn { display:inline-flex; align-items:center; justify-content:center; border: 0; cursor: pointer; font-size: 15px; font-weight: 700;
-         padding: 13px 22px; border-radius: 999px; text-decoration: none; transition: filter .15s, transform .05s, box-shadow .15s; }
-  .btn:active { transform: translateY(1px); }
-  .btn-primary { background: #fff; color: var(--hero); box-shadow: 0 10px 24px rgba(0,0,0,.18); }
-  .btn-ghost { background: rgba(255,255,255,.08); color: #fff; border: 1px solid rgba(255,255,255,.18); }
-  .btn-primary:hover, .btn-ghost:hover { filter: brightness(1.05); }
-  .hero .badges { display: flex; gap: 10px; flex-wrap: wrap; }
-  .hero .badge { font-size: 12.5px; font-weight: 700; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
-                 padding: 6px 11px; border-radius: 999px; color: rgba(255,255,255,.9); }
-  .hero-proof {
-    margin-top: 26px;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-  }
-  @media (max-width: 720px){ .hero-proof { grid-template-columns: 1fr; } }
-  .hero-stat {
-    border-radius: 18px;
-    border: 1px solid rgba(255,255,255,.12);
-    background: rgba(255,255,255,.06);
-    padding: 16px 18px;
-  }
-  .hero-stat .kicker { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.62); font-weight: 700; }
-  .hero-stat .value { margin-top: 6px; font-size: 22px; font-weight: 800; letter-spacing: -.03em; }
-  .hero-stat .desc { margin-top: 4px; color: rgba(255,255,255,.74); font-size: 13.5px; }
-  .hero-panel {
-    border-radius: 24px;
-    border: 1px solid rgba(255,255,255,.12);
-    background: rgba(255,255,255,.06);
-    box-shadow: 0 18px 40px rgba(0,0,0,.18);
-    padding: 20px;
-    backdrop-filter: blur(12px);
-  }
-  .hero-panel .panel-head {
-    display:flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 18px;
-  }
-  .hero-panel .panel-head strong { font-size: 18px; letter-spacing: -.02em; }
-  .hero-panel .panel-head span { color: rgba(255,255,255,.68); font-size: 13px; }
-  .hero-panel .panel-grid {
-    display:grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    margin-bottom: 14px;
-  }
-  .hero-panel .panel-metric {
-    border-radius: 16px;
-    background: rgba(255,255,255,.08);
-    border: 1px solid rgba(255,255,255,.08);
-    padding: 14px;
-  }
-  .hero-panel .panel-metric .label { font-size: 12px; letter-spacing:.12em; text-transform: uppercase; color: rgba(255,255,255,.58); font-weight:700; }
-  .hero-panel .panel-metric .num { margin-top: 6px; font-size: 24px; font-weight: 800; letter-spacing: -.03em; }
-  .hero-panel .panel-metric .small { margin-top: 4px; color: rgba(255,255,255,.76); font-size: 13px; }
-  .hero-panel .receipt {
-    margin-top: 0;
-    background: rgba(4,10,18,.88);
-    border: 1px solid rgba(255,255,255,.08);
-  }
-  .hero-panel .panel-foot {
-    margin-top: 14px;
-    display:flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .chip {
-    display:inline-flex;
-    align-items:center;
-    gap: 6px;
-    border-radius: 999px;
-    border: 1px solid rgba(255,255,255,.12);
-    background: rgba(255,255,255,.06);
-    padding: 7px 11px;
-    color: rgba(255,255,255,.85);
-    font-size: 12.5px;
-    font-weight: 700;
-  }
-
-  main { padding: 0 0 24px; }
-  section.band { padding: 60px 0; }
-  section.band.alt { background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,255,255,.96)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-  h2.section { font-size: 30px; letter-spacing: -.035em; margin: 0 0 8px; line-height: 1.08; }
-  p.section-sub { color: var(--muted); font-size: 16px; margin: 0 0 28px; max-width: 64ch; }
-  .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 12px; font-weight: 800; color: var(--accent); margin: 0 0 8px; }
-
-  .proofbar {
-    display:grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 14px;
-    margin-top: -26px;
-    margin-bottom: 28px;
-  }
-  @media (max-width: 920px){ .proofbar { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 560px){ .proofbar { grid-template-columns: 1fr; } }
-  .proof {
-    background: rgba(255,255,255,.82);
-    border: 1px solid rgba(217,225,232,.95);
-    border-radius: 18px;
-    padding: 16px 18px;
-    box-shadow: var(--shadow);
-  }
-  .proof .top {
-    display:flex;
-    align-items:center;
-    gap: 10px;
-    margin-bottom: 6px;
+  .lede {
+    margin: 24px 0 0;
+    max-width: 670px;
     color: var(--muted);
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: .12em;
-    font-weight: 800;
+    font-size: clamp(17px, 2vw, 20px);
+    line-height: 1.55;
   }
-  .proof .value { font-size: 22px; font-weight: 800; letter-spacing: -.03em; line-height: 1.1; }
-  .proof .desc { margin-top: 6px; color: var(--muted); font-size: 13px; }
-
-  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  @media (max-width: 820px){ .grid3 { grid-template-columns: 1fr; } }
-  .card { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
-  .card h3 { margin: 0 0 6px; font-size: 17px; }
-  .card .ico { font-size: 26px; }
-  .card p { margin: 8px 0 0; color: var(--muted); font-size: 14.5px; }
-
-  label { display: block; font-size: 13px; font-weight: 700; color: var(--muted); margin: 14px 0 5px; }
-  input, select {
-    width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; font-size: 15px; background: #fff; color: var(--ink);
+  .ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .hero-note {
+    margin-top: 28px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    color: var(--quiet);
+    font-size: 13px;
   }
-  input:focus, select:focus { outline: 2px solid var(--green-soft); border-color: var(--green-2); }
-  .row { display: flex; gap: 12px; flex-wrap: wrap; }
-  .row > div { flex: 1; min-width: 150px; }
-  .result { margin-top: 18px; }
-  .verdict { display:flex; align-items:center; gap:12px; padding:16px; border-radius:14px; font-size:16px; font-weight:800; }
-  .verdict.protected { background: var(--green-soft); color: var(--green); }
-  .verdict.open { background:#eef2f5; color: var(--ink); }
-  .verdict .icon { font-size: 24px; }
-  .meta { margin-top: 10px; color: var(--muted); font-size: 14px; }
-  .receipt { font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; background:#0f1720; color:#d6e2ea;
-             padding:14px 16px; border-radius:11px; white-space:pre-wrap; word-break:break-word; margin-top:14px; }
-  .quick-picks { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
-  .quick-picks button {
+  .hero-note strong { color: var(--ink); font-weight: 760; }
+  .hero-note span,
+  .reveal summary,
+  .agent-reveal summary,
+  .plan-reveal summary,
+  .agent-card summary,
+  .quick-picks button,
+  .btn,
+  label {
+    white-space: nowrap;
+  }
+
+  .console {
     border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .9);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .console-top {
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .console-title { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; }
+  .console-title::before {
+    content: "";
+    width: 17px;
+    height: 17px;
+    border: 1.7px solid var(--accent);
+    border-top: 0;
+    border-radius: 1px 1px 6px 6px;
+  }
+  .status-dot { display: inline-flex; align-items: center; gap: 7px; color: var(--ok); font-size: 12px; font-weight: 760; }
+  .status-dot::before { content: ""; width: 7px; height: 7px; border-radius: 99px; background: var(--ok); }
+  .console-body { padding: 16px; display: grid; gap: 14px; }
+  .reveal-stack { display: grid; gap: 9px; }
+  .reveal {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, .82);
+    overflow: hidden;
+  }
+  .reveal summary {
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 12px;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 800;
+    list-style: none;
+    cursor: pointer;
+  }
+  .reveal summary::-webkit-details-marker { display: none; }
+  .reveal summary::after {
+    content: "+";
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    color: var(--accent-strong);
+    font-size: 14px;
+    line-height: 1;
+  }
+  .reveal[open] summary {
+    border-bottom: 1px solid var(--line);
+    background: var(--paper);
+  }
+  .reveal[open] summary::after { content: "-"; }
+  .reveal-body { padding: 12px; display: grid; gap: 12px; }
+  .console-meta {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--line);
+  }
+  .meta-cell {
+    min-height: 58px;
+    background: rgba(255, 255, 255, .86);
+    padding: 10px;
+  }
+  .meta-cell span {
+    display: block;
+    color: var(--quiet);
+    font-size: 10px;
+    font-weight: 830;
+    text-transform: uppercase;
+  }
+  .meta-cell strong {
+    display: block;
+    margin-top: 5px;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.15;
+  }
+  .fieldline {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: end;
+  }
+  label { display: block; margin: 0 0 7px; color: var(--muted); font-size: 12px; font-weight: 760; }
+  input, select {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
     background: #fff;
     color: var(--ink);
-    border-radius: 999px;
-    padding: 7px 11px;
-    font-size: 12.5px;
-    font-weight: 700;
-    cursor:pointer;
+    padding: 0 12px;
+    font-size: 14px;
+    transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
   }
-  .quick-picks button:hover { border-color: var(--accent); color: var(--accent); }
-  table { width:100%; border-collapse:collapse; margin-top:14px; font-size:14px; }
-  td, th { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
-  th { color: var(--muted); font-weight:700; }
-  .held, .violations-ok { color: var(--green); font-weight:800; }
-  .violations-bad { color: var(--red); font-weight:800; }
-  .notice { padding:12px 14px; border-radius:9px; font-size:14px; margin-top:14px; }
-  .notice.warn { background: var(--amber-soft); color: var(--amber); border:1px solid #f0e0b0; }
-  .notice.err { background: var(--red-soft); color: var(--red); border:1px solid #f3cfc9; }
-  .notice.ok { background: var(--green-soft); color: var(--green); border:1px solid #bfe0c2; }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(0, 167, 181, .12); outline: 0; }
+  .provider-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .provider {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--paper);
+    padding: 6px 10px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 760;
+  }
+  .provider.active { border-color: rgba(0, 167, 181, .42); background: var(--accent-soft); color: var(--accent-strong); }
+  .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .mini {
+    min-height: 88px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--paper-2);
+    padding: 12px;
+  }
+  .mini span { display: block; color: var(--quiet); font-size: 11px; font-weight: 800; text-transform: uppercase; }
+  .mini strong { display: block; margin-top: 8px; color: var(--ink); font-size: 20px; line-height: 1.05; font-weight: 840; }
+  .mini small { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.3; }
+  .receipt {
+    border-radius: var(--radius);
+    background: #121820;
+    color: #dce9ef;
+    padding: 12px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    overflow-wrap: anywhere;
+  }
+  .audit-rail {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  .rail-item {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    padding: 9px;
+  }
+  .rail-item span {
+    display: block;
+    color: var(--quiet);
+    font-size: 10px;
+    font-weight: 830;
+    text-transform: uppercase;
+  }
+  .rail-item strong {
+    display: block;
+    margin-top: 4px;
+    color: var(--ink);
+    font-size: 13px;
+  }
+  .rail-item.ok strong { color: var(--ok); }
+  .rows { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .preview-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+    background: #fff;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .preview-row:last-child { border-bottom: 0; }
+  .preview-row span { color: var(--muted); }
+  .tag {
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 830;
+  }
+  .tag.ok { background: var(--ok-soft); color: var(--ok); }
+  .tag.risk { background: var(--risk-soft); color: var(--risk); }
+  .tag.neutral { background: var(--paper-2); color: var(--muted); }
 
-  /* pricing */
-  .pricing { display:grid; grid-template-columns: repeat(3,1fr); gap:18px; align-items:stretch; }
-  @media (max-width: 820px){ .pricing { grid-template-columns: 1fr; } }
-  .plan { background: var(--surface-2); border:1px solid var(--line); border-radius: var(--radius); padding:24px; display:flex; flex-direction:column; box-shadow: var(--shadow); }
-  .plan.feature { border:2px solid var(--green-2); position:relative; }
-  .plan.feature::after { content:"Most popular"; position:absolute; top:-11px; left:24px; background:var(--green-2); color:#fff; font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; }
-  .plan h3 { margin:0; font-size:18px; }
-  .plan .price { font-size:30px; font-weight:800; letter-spacing:-.02em; margin:6px 0 2px; }
-  .plan .price small { font-size:14px; font-weight:600; color:var(--muted); }
-  .plan .blurb { color:var(--muted); font-size:14px; margin:6px 0 14px; min-height:40px; }
-  .plan ul { list-style:none; padding:0; margin:0 0 18px; font-size:14px; }
-  .plan li { padding:6px 0 6px 24px; position:relative; color:var(--ink); }
-  .plan li::before { content:"✓"; position:absolute; left:0; color:var(--green-2); font-weight:800; }
-  .plan .btn { margin-top:auto; text-align:center; }
-  .plan .btn-buy { background: var(--green); color:#fff; }
-  .plan .btn-free { background:#eef2f5; color:var(--ink); }
+  main { padding-bottom: 34px; }
+  .proof-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    margin-top: 20px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--line);
+  }
+  .proof {
+    min-height: 96px;
+    background: rgba(255, 255, 255, .92);
+    padding: 0;
+  }
+  .proof summary {
+    min-height: 96px;
+    display: grid;
+    align-content: center;
+    gap: 12px;
+    padding: 18px;
+    list-style: none;
+    cursor: pointer;
+  }
+  .proof summary::-webkit-details-marker { display: none; }
+  .proof summary::after,
+  .step summary::after,
+  .agent-card summary::after {
+    content: "+";
+    color: var(--accent-strong);
+    font-size: 14px;
+    font-weight: 800;
+  }
+  .proof[open] summary,
+  .step[open] summary,
+  .agent-card[open] summary {
+    border-bottom: 1px solid var(--line);
+  }
+  .proof[open] summary::after,
+  .step[open] summary::after,
+  .agent-card[open] summary::after {
+    content: "-";
+  }
+  .proof svg { width: 22px; height: 22px; color: var(--accent-strong); stroke-width: 1.8; }
+  .proof h3 { margin: 0; font-size: 15px; line-height: 1.2; }
+  .proof p { margin: 0; padding: 0 18px 18px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 
-  code { background:#eef2f5; padding:1px 6px; border-radius:5px; font-size:13px; }
-  .agentbox { display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
-  @media (max-width: 820px){ .agentbox { grid-template-columns: 1fr; } }
-  footer { color: var(--muted); font-size: 13.5px; padding: 36px 0 56px; border-top:1px solid var(--line); background:rgba(255,255,255,.85); }
-  footer .cols { display:flex; gap:32px; flex-wrap:wrap; justify-content:space-between; }
-  footer a { color: var(--muted); text-decoration:none; display:block; padding:3px 0; }
-  footer a:hover { color: var(--green); }
-  .pill { display:inline-block; background:var(--green-soft); color:var(--green); border-radius:999px; padding:3px 11px; font-size:12px; font-weight:700; }
+  section { padding: 70px 0 0; }
+  .section-head {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 28px;
+    margin-bottom: 24px;
+  }
+  .section-head h2 {
+    margin: 0;
+    max-width: 760px;
+    font-size: clamp(30px, 4vw, 50px);
+    line-height: 1;
+    font-weight: 820;
+    white-space: nowrap;
+  }
+  .section-head p { margin: 0; max-width: 420px; color: var(--muted); }
+  .workflow {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--line);
+  }
+  .step {
+    min-height: 170px;
+    background: #fff;
+    padding: 0;
+  }
+  .step + .step { border-left: 1px solid var(--line); }
+  .step summary {
+    min-height: 170px;
+    display: grid;
+    align-content: start;
+    gap: 18px;
+    padding: 22px;
+    list-style: none;
+    cursor: pointer;
+  }
+  .step summary::-webkit-details-marker { display: none; }
+  .step-num { color: var(--accent-strong); font-size: 12px; font-weight: 840; }
+  .step h3 { margin: 0; font-size: 22px; line-height: 1.05; }
+  .step p { margin: 0; padding: 0 22px 22px; color: var(--muted); }
+
+  .demo-grid {
+    display: grid;
+    grid-template-columns: minmax(0, .92fr) minmax(360px, 1.08fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .9);
+    box-shadow: 0 12px 36px rgba(17, 22, 28, .06);
+    padding: 18px;
+  }
+  .panel h3 { margin: 0 0 14px; font-size: 18px; }
+  .stack { display: grid; gap: 13px; }
+  .quick-picks { display: flex; flex-wrap: wrap; gap: 8px; }
+  .quick-picks button {
+    min-height: 31px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    color: var(--muted);
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 760;
+  }
+  .quick-picks button:hover { color: var(--accent-strong); border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .result { margin-top: 14px; }
+  .verdict {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-radius: var(--radius);
+    padding: 13px;
+    font-size: 14px;
+    font-weight: 820;
+  }
+  .verdict.protected { background: var(--ok-soft); color: var(--ok); }
+  .verdict.open { background: var(--paper-2); color: var(--ink); }
+  .verdict .icon {
+    width: 22px;
+    height: 22px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 6px;
+    border: 1px solid currentColor;
+    font-size: 0;
+  }
+  .verdict .icon::before { content: ""; width: 10px; height: 10px; border: 2px solid currentColor; border-top: 0; border-radius: 1px 1px 5px 5px; }
+  .meta { margin-top: 9px; color: var(--muted); font-size: 13px; }
+  .notice { margin-top: 12px; border-radius: var(--radius); padding: 12px; font-size: 13px; }
+  .notice.warn { background: var(--risk-soft); color: var(--risk); border: 1px solid #f5d3a6; }
+  .notice.err { background: var(--danger-soft); color: var(--danger); border: 1px solid #f4c7c3; }
+  .notice.ok { background: var(--ok-soft); color: var(--ok); border: 1px solid #bfe9db; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; }
+  th { color: var(--muted); font-weight: 800; }
+  .held, .violations-ok { color: var(--ok); font-weight: 840; }
+  .violations-bad { color: var(--danger); font-weight: 840; }
+
+  .pricing {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  .plan {
+    position: relative;
+    min-height: 285px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+  }
+  .plan.feature { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(0, 167, 181, .09); }
+  .plan h3 { margin: 0; font-size: 18px; }
+  .plan .price { margin-top: 12px; font-size: 34px; line-height: 1; font-weight: 840; }
+  .plan .blurb { margin: 0; color: var(--muted); font-size: 13px; }
+  .plan ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; color: var(--ink); font-size: 13px; }
+  .plan li { padding-left: 18px; position: relative; }
+  .plan li::before { content: ""; position: absolute; left: 0; top: .62em; width: 7px; height: 7px; border-radius: 99px; background: var(--accent); }
+  .plan .btn { margin-top: auto; width: 100%; }
+  .plans-foot { margin-top: 14px; max-width: 430px; }
+  .plan-reveal {
+    margin: 16px 0 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .plan-reveal summary {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 11px;
+    font-size: 12px;
+    font-weight: 820;
+    list-style: none;
+    cursor: pointer;
+  }
+  .plan-reveal summary::-webkit-details-marker { display: none; }
+  .plan-reveal summary::after { content: "+"; color: var(--accent-strong); }
+  .plan-reveal[open] summary { border-bottom: 1px solid var(--line); }
+  .plan-reveal[open] summary::after { content: "-"; }
+  .plan-reveal-body { padding: 11px; display: grid; gap: 10px; }
+
+  .agent-grid {
+    display: grid;
+    grid-template-columns: .92fr 1.08fr;
+    gap: 14px;
+    align-items: stretch;
+  }
+  .agent-terminal {
+    min-height: 100%;
+    border: 1px solid #1f2a35;
+    border-radius: 12px;
+    background: #111820;
+    color: #dce9ef;
+    padding: 18px;
+    display: grid;
+    align-content: start;
+    gap: 14px;
+    box-shadow: 0 18px 44px rgba(17, 22, 28, .16);
+  }
+  .agent-terminal h3 { margin: 0; color: #fff; font-size: 18px; }
+  .agent-terminal p { margin: 0; color: #aebec9; }
+  .agent-reveal {
+    border: 1px solid rgba(220, 233, 239, .14);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, .035);
+    overflow: hidden;
+  }
+  .agent-reveal summary {
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 12px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 800;
+    list-style: none;
+    cursor: pointer;
+  }
+  .agent-reveal summary::-webkit-details-marker { display: none; }
+  .agent-reveal summary::after {
+    content: "+";
+    color: #57d9e7;
+    font-size: 16px;
+  }
+  .agent-reveal[open] summary { border-bottom: 1px solid rgba(220, 233, 239, .14); }
+  .agent-reveal[open] summary::after { content: "-"; }
+  .terminal-lines {
+    display: grid;
+    gap: 8px;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: 10px;
+  }
+  .terminal-lines div {
+    border: 1px solid rgba(220, 233, 239, .12);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, .04);
+    padding: 10px;
+  }
+  .terminal-lines b { color: #57d9e7; font-weight: 760; }
+  .agent-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .agent-card {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    padding: 0;
+    overflow: hidden;
+  }
+  .agent-card summary {
+    min-height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 18px;
+    list-style: none;
+    cursor: pointer;
+  }
+  .agent-card summary::-webkit-details-marker { display: none; }
+  .agent-card h3 { margin: 0; font-size: 17px; }
+  .agent-card p { margin: 0; padding: 0 18px 18px; color: var(--muted); }
+  code { background: var(--paper-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+
+  footer {
+    margin-top: 76px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, .86);
+    color: var(--muted);
+    padding: 30px 0 46px;
+    font-size: 13px;
+  }
+  .footer-grid { display: flex; justify-content: space-between; gap: 28px; flex-wrap: wrap; }
+  footer strong { color: var(--ink); }
+  footer a { display: block; color: var(--muted); text-decoration: none; margin-top: 6px; }
+  footer a:hover { color: var(--accent-strong); }
+
+  @media (max-width: 940px) {
+    .links a:not(.btn) { display: none; }
+    .hero { padding-top: 50px; }
+    .hero-grid, .demo-grid { grid-template-columns: 1fr; }
+    .proof-strip, .workflow, .pricing { grid-template-columns: 1fr; }
+    .step + .step { border-left: 0; border-top: 1px solid var(--line); }
+    .section-head { display: block; }
+    .section-head p { margin-top: 12px; }
+  }
+  @media (max-width: 560px) {
+    .wrap { width: min(100% - 28px, 1180px); }
+    .bar { min-height: 58px; }
+    .brand { font-size: 13px; }
+    .links .btn { min-height: 36px; padding: 0 10px; }
+    .hero h1 { font-size: 38px; }
+    .fieldline, .mini-grid, .row, .agent-grid, .agent-cards, .console-meta { grid-template-columns: 1fr; }
+    .audit-rail { grid-template-columns: 1fr 1fr; }
+    .console-body, .panel, .plan { padding: 14px; }
+    .proof summary, .step summary, .agent-card summary { padding: 14px; }
+    .proof p, .step p, .agent-card p { padding: 0 14px 14px; }
+    .agent-terminal { padding: 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+  }
 </style>
 </head>
 <body>
-
 <a class="skip" href="#main">Skip to content</a>
 
-<nav>
+<nav aria-label="Primary">
   <div class="wrap bar">
-    <a class="brand" href="#top"><span class="dot"></span> Universal Mail Automation</a>
+      <a class="brand" href="#top" aria-label="Protected Inbox Audit home"><span class="brand-mark" aria-hidden="true"></span> Protected Inbox Audit</a>
     <div class="links">
-      <a href="#how">How it works</a>
-      <a href="#demo">Try it</a>
-      <a href="#pricing">Pricing</a>
-      <a href="#agents">For agents</a>
-      <a href="/docs">API</a>
-      <a class="cta" href="#demo">Get started</a>
+      <a href="#risk-check">Risk check</a>
+      <a href="#proof">Proof</a>
+      <a href="#plans">Plans</a>
+      <a href="/docs">Docs</a>
+      <a class="btn btn-primary" href="#risk-check">Run risk check</a>
     </div>
   </div>
 </nav>
@@ -318,240 +725,312 @@
 <header class="hero" id="top">
   <div class="wrap hero-grid">
     <div>
-      <div class="eyebrow" style="color:#8fd3cc">Provable restraint</div>
-      <h1>Clean your inbox. Prove you never touched what matters.</h1>
-      <p class="lede">Automated triage across Gmail, Outlook, iCloud and IMAP, driven by one shared rules engine and Eisenhower priority tiers. The <strong>fail-closed protected-sender gate</strong> keeps legal, financial, government and account mail in place, and every run emits a <strong>signed, re-derivable audit receipt</strong>.</p>
+      <h1>Inbox risk first.</h1>
+      <p class="lede">Audit. Hold. Prove.</p>
       <div class="ctas">
-        <a class="btn btn-primary" href="#demo">Try the live demo</a>
-        <a class="btn btn-ghost" href="#pricing">See pricing</a>
+        <a class="btn btn-primary" href="#risk-check">Run risk check</a>
+        <a class="btn btn-secondary" href="#proof">View audit proof</a>
       </div>
-      <div class="badges">
-        <span class="badge">Fail-closed gate</span>
-        <span class="badge">Signed audit receipt</span>
-        <span class="badge">Gmail · Outlook · iCloud · IMAP</span>
-        <span class="badge">MCP + ACP</span>
-      </div>
-      <div class="hero-proof">
-        <div class="hero-stat">
-          <div class="kicker">Trust</div>
-          <div class="value">Never archive protected mail</div>
-          <div class="desc">The gate is sender-based and fail-closed.</div>
-        </div>
-        <div class="hero-stat">
-          <div class="kicker">Receipt</div>
-          <div class="value">Signed, re-derivable evidence</div>
-          <div class="desc">Every run can be checked after the fact.</div>
-        </div>
-        <div class="hero-stat">
-          <div class="kicker">Surface</div>
-          <div class="value">Human UI + MCP + ACP</div>
-          <div class="desc">One engine exposed to people and agents.</div>
-        </div>
+      <div class="hero-note" aria-label="Product guarantees">
+        <span><strong>Fail-closed</strong> gate</span>
+        <span><strong>Signed</strong> receipts</span>
+        <span><strong>Dry-run</strong> first</span>
       </div>
     </div>
-    <aside class="hero-panel" aria-label="Live system preview">
-      <div class="panel-head">
-        <strong>Live system state</strong>
-        <span>/app/ is serving now</span>
+
+    <aside class="console" aria-label="Risk console preview">
+      <div class="console-top">
+        <div class="console-title">Risk console</div>
+        <div class="status-dot">Live</div>
       </div>
-      <div class="panel-grid">
-        <div class="panel-metric">
-          <div class="label">Gate</div>
-          <div class="num">Fail-closed</div>
-          <div class="small">Protected sender stays put</div>
+      <div class="console-body">
+        <div class="fieldline">
+          <div>
+            <label for="consoleSender">Sender under review</label>
+            <input id="consoleSender" value="clerk@courts.ca.gov" aria-label="Preview sender" readonly />
+          </div>
+          <a class="btn btn-secondary" href="#risk-check">Check</a>
         </div>
-        <div class="panel-metric">
-          <div class="label">Proof</div>
-          <div class="num">Signed receipt</div>
-          <div class="small">Receipt + verification endpoint</div>
+        <div class="mini-grid">
+          <div class="mini">
+            <span>Verdict</span>
+            <strong>Protected</strong>
+            <small>Held before action.</small>
+          </div>
+          <div class="mini">
+            <span>Receipt</span>
+            <strong>sha256</strong>
+            <small>Evidence attached.</small>
+          </div>
         </div>
-        <div class="panel-metric">
-          <div class="label">Providers</div>
-          <div class="num">4 live</div>
-          <div class="small">Gmail, Outlook, IMAP, Mail.app</div>
+        <div class="reveal-stack" aria-label="Layered audit details">
+          <details class="reveal">
+            <summary>Providers</summary>
+            <div class="reveal-body">
+              <div class="provider-row" aria-label="Supported providers">
+                <span class="provider active">Gmail</span>
+                <span class="provider">Outlook</span>
+                <span class="provider">iCloud</span>
+                <span class="provider">IMAP</span>
+              </div>
+            </div>
+          </details>
+          <details class="reveal">
+            <summary>Audit state</summary>
+            <div class="reveal-body">
+              <div class="console-meta" aria-label="Audit state">
+                <div class="meta-cell">
+                  <span>Audit ID</span>
+                  <strong>7f3a9c2e</strong>
+                </div>
+                <div class="meta-cell">
+                  <span>Mode</span>
+                  <strong>Read-only</strong>
+                </div>
+                <div class="meta-cell">
+                  <span>Checks</span>
+                  <strong>12 / 50 today</strong>
+                </div>
+              </div>
+            </div>
+          </details>
+          <details class="reveal">
+            <summary>Counters</summary>
+            <div class="reveal-body">
+              <div class="audit-rail" aria-label="Audit proof counters">
+                <div class="rail-item ok">
+                  <span>Protected held</span>
+                  <strong>2</strong>
+                </div>
+                <div class="rail-item">
+                  <span>Would archive</span>
+                  <strong>1</strong>
+                </div>
+                <div class="rail-item ok">
+                  <span>Violations</span>
+                  <strong>0</strong>
+                </div>
+                <div class="rail-item ok">
+                  <span>Signature</span>
+                  <strong>verified</strong>
+                </div>
+              </div>
+            </div>
+          </details>
+          <details class="reveal">
+            <summary>Sample</summary>
+            <div class="reveal-body">
+              <div class="rows" aria-label="Triage preview rows">
+                <div class="preview-row"><span>Legal notice from courts.ca.gov</span><b class="tag ok">held</b></div>
+                <div class="preview-row"><span>Payment trail from stripe.com</span><b class="tag ok">held</b></div>
+                <div class="preview-row"><span>Promo digest from deals.example</span><b class="tag neutral">archive</b></div>
+              </div>
+            </div>
+          </details>
+          <details class="reveal">
+            <summary>Receipt hash</summary>
+            <div class="reveal-body">
+              <div class="receipt">receipt run_7c9e... protected_held=2 archived=1 violations=0 signature=sha256:5f4a...</div>
+            </div>
+          </details>
         </div>
-        <div class="panel-metric">
-          <div class="label">Agent access</div>
-          <div class="num">MCP + ACP</div>
-          <div class="small">Tools + commerce surfaces</div>
-        </div>
-      </div>
-      <div class="receipt">Triage receipt: 3 message(s) — 2 protected held in inbox, 1 would leave inbox, 0 labeled-in-inbox, 0 kept.</div>
-      <div class="panel-foot">
-        <span class="chip">Fail-closed on empty sender</span>
-        <span class="chip">Dry-run by default</span>
-        <span class="chip">Runtime verified</span>
       </div>
     </aside>
   </div>
 </header>
 
 <main id="main">
-  <section class="band" aria-label="Proof strip">
+  <section aria-label="Proof strip">
+    <div class="wrap proof-strip" id="proof">
+      <details class="proof">
+        <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M12 3 5 6v5c0 5 3.5 8.5 7 10 3.5-1.5 7-5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-5"/></svg><h3>Fail-closed</h3></summary>
+        <p>Protected mail stays in place when sender evidence is missing or high-risk.</p>
+      </details>
+      <details class="proof">
+        <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M7 3h8l4 4v17l-3-2-3 2-3-2-3 2-3-2V3Z"/><path d="M15 3v5h5"/><path d="M8 12h8M8 16h6"/></svg><h3>Signed receipt</h3></summary>
+        <p>Every run gets a checkable receipt.</p>
+      </details>
+      <details class="proof">
+        <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 7h16v12H4z"/><path d="m4 7 8 6 8-6"/><path d="M8 3h8"/></svg><h3>Providers</h3></summary>
+        <p>Gmail, Outlook, iCloud, IMAP.</p>
+      </details>
+      <details class="proof">
+        <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/><path d="M4 4h16v16H4z"/></svg><h3>Read-only</h3></summary>
+        <p>Audit first. Cleanup later.</p>
+      </details>
+    </div>
+  </section>
+
+  <section aria-labelledby="workflow-title">
     <div class="wrap">
-      <div class="proofbar">
-        <div class="proof">
-          <div class="top">Runtime</div>
-          <div class="value">Verified locally</div>
-          <div class="desc">The app serves, the gate holds, and ACP completes.</div>
-        </div>
-        <div class="proof">
-          <div class="top">Delivery</div>
-          <div class="value">Frontend + API + agents</div>
-          <div class="desc">One surface for humans, MCP tools, and ACP.</div>
-        </div>
-        <div class="proof">
-          <div class="top">Safety</div>
-          <div class="value">Protected mail never moves</div>
-          <div class="desc">The key invariant is enforced before action.</div>
-        </div>
-        <div class="proof">
-          <div class="top">Evidence</div>
-          <div class="value">Signed receipts</div>
-          <div class="desc">Every run can be audited later.</div>
-        </div>
+      <div class="section-head">
+        <h2 id="workflow-title">Risk to proof.</h2>
+        <p>Three steps. Reveal details only when needed.</p>
+      </div>
+      <div class="workflow">
+        <details class="step">
+          <summary><div class="step-num">01</div><h3>Check senders.</h3></summary>
+        <p>Find protected senders.</p>
+        </details>
+        <details class="step">
+          <summary><div class="step-num">02</div><h3>Preview moves.</h3></summary>
+          <p>See what would move.</p>
+        </details>
+        <details class="step">
+          <summary><div class="step-num">03</div><h3>Export proof.</h3></summary>
+          <p>Save verifiable proof.</p>
+        </details>
       </div>
     </div>
   </section>
 
-  <!-- how it works -->
-  <section class="band" id="how">
+  <section id="risk-check" aria-labelledby="risk-title">
     <div class="wrap">
-      <p class="eyebrow">Why it's safe to automate</p>
-      <h2 class="section">Three guarantees, on for everyone</h2>
-      <p class="section-sub">The safety machinery is never a paid upgrade. Free accounts get the same gate and the same receipt — you pay for reach and retention, never for protection.</p>
-      <div class="grid3">
-        <div class="card">
-          <div class="ico">🛡️</div>
-          <h3>Protected-sender gate</h3>
-          <p>The gate decides on the real, parsed sending domain — not a fragile string match. Legal, financial, government and account senders are held in the inbox, always. The engine fails <em>closed</em>: a gate violation aborts the run.</p>
-        </div>
-        <div class="card">
-          <div class="ico">🧾</div>
-          <h3>Signed audit receipt</h3>
-          <p>Every run produces an independent, re-derivable receipt — your <strong>Compliance Evidence Pack</strong>. It records what was protected, archived, moved and kept, and refuses to report success if a protected sender ever left the inbox.</p>
-        </div>
-        <div class="card">
-          <div class="ico">✉️</div>
-          <h3>One engine, every mailbox</h3>
-          <p>Gmail, Outlook (Graph), iCloud and generic IMAP behind a single provider interface and one categorization taxonomy. Same rules, same tiers, same receipts — whichever inbox you point it at.</p>
-        </div>
+      <div class="section-head">
+        <h2 id="risk-title">Run risk check.</h2>
+        <p>Live API when served. Static fallback on file links.</p>
       </div>
-    </div>
-  </section>
-
-  <!-- live demo -->
-  <section class="band alt" id="demo">
-    <div class="wrap narrow">
-      <p class="eyebrow">Live · no credentials</p>
-      <h2 class="section">Will it ever touch this sender?</h2>
-      <p class="section-sub">This calls the real gate on the real parsed domain. No mailbox, no signup — just proof of restraint.</p>
-      <div class="card">
-        <label for="sender">Sender email</label>
-        <input id="sender" type="text" placeholder="clerk@courts.ca.gov" value="clerk@courts.ca.gov" />
-        <div class="quick-picks" aria-label="Sender presets">
-          <button type="button" data-sender="clerk@courts.ca.gov">Gov sender</button>
-          <button type="button" data-sender="alerts@chase.com">Bank sender</button>
-          <button type="button" data-sender="newsletter@deals-promo.example">Newsletter</button>
-          <button type="button" data-sender="">Empty sender</button>
-        </div>
-        <label for="subject">Subject (optional)</label>
-        <input id="subject" type="text" placeholder="Notice of hearing" />
-        <button class="btn btn-primary" id="checkBtn" style="margin-top:16px;background:var(--green);color:#fff">Check sender</button>
-        <div class="result" id="checkResult"></div>
-      </div>
-
-      <h2 class="section" style="margin-top:40px">Preview a triage — nothing is touched</h2>
-      <p class="section-sub">A dry run shows exactly what <em>would</em> be archived plus the audit receipt. Requires a mailbox connected on the server.</p>
-      <div class="card">
-        <div class="row">
-          <div>
-            <label for="provider">Provider</label>
-            <select id="provider">
-              <option value="gmail">Gmail</option>
-              <option value="imap">IMAP</option>
-              <option value="mailapp">Apple Mail</option>
-              <option value="outlook">Outlook</option>
-            </select>
+      <div class="demo-grid">
+        <div class="panel">
+          <h3>Sender gate</h3>
+          <div class="stack">
+            <div>
+              <label for="sender">Sender email</label>
+              <input id="sender" type="text" placeholder="clerk@courts.ca.gov" value="clerk@courts.ca.gov" autocomplete="off" />
+            </div>
+            <div class="quick-picks" aria-label="Sender presets">
+              <button type="button" data-sender="clerk@courts.ca.gov">Gov sender</button>
+              <button type="button" data-sender="alerts@chase.com">Bank sender</button>
+              <button type="button" data-sender="newsletter@deals-promo.example">Newsletter</button>
+              <button type="button" data-sender="">Empty sender</button>
+            </div>
+            <div>
+              <label for="subject">Subject optional</label>
+              <input id="subject" type="text" placeholder="Notice of hearing" />
+            </div>
+            <button class="btn btn-primary" id="checkBtn" type="button">Check sender</button>
           </div>
-          <div>
-            <label for="limit">Limit</label>
-            <input id="limit" type="number" min="1" max="1000" value="50" />
-          </div>
+          <div class="result" id="checkResult"></div>
         </div>
-        <label for="query">Query</label>
-        <input id="query" type="text" value="has:nouserlabels" />
-        <button class="btn btn-primary" id="previewBtn" style="margin-top:16px;background:var(--green);color:#fff">Preview (dry run)</button>
-        <div class="result" id="previewResult"></div>
+
+        <div class="panel">
+          <h3>Dry-run triage preview</h3>
+          <div class="stack">
+            <div class="row">
+              <div>
+                <label for="provider">Provider</label>
+                <select id="provider">
+                  <option value="gmail">Gmail</option>
+                  <option value="imap">IMAP</option>
+                  <option value="mailapp">Apple Mail</option>
+                  <option value="outlook">Outlook</option>
+                </select>
+              </div>
+              <div>
+                <label for="limit">Limit</label>
+                <input id="limit" type="number" min="1" max="1000" value="50" />
+              </div>
+            </div>
+            <div>
+              <label for="query">Query</label>
+              <input id="query" type="text" value="has:nouserlabels" />
+            </div>
+            <button class="btn btn-primary" id="previewBtn" type="button">Preview dry run</button>
+          </div>
+          <div class="result" id="previewResult"></div>
+        </div>
       </div>
     </div>
   </section>
 
-  <!-- pricing -->
-  <section class="band" id="pricing">
+  <section aria-labelledby="plans-title">
     <div class="wrap">
-      <p class="eyebrow">Pricing</p>
-      <h2 class="section">Pay for reach, never for safety</h2>
-      <p class="section-sub">The gate and the signed receipt are included on every tier, including Free. Upgrade for more monthly runs, more providers, and retained receipts.</p>
-      <div id="plans" class="pricing"><p class="meta">Loading plans…</p></div>
-      <div class="card" style="margin-top:18px;max-width:480px">
-        <label for="email">Your email (for checkout &amp; receipts)</label>
+      <div class="section-head">
+        <h2 id="plans-title">Plans stay simple.</h2>
+        <p>Safety is included. Scale reveals the rest.</p>
+      </div>
+      <div id="plans" class="pricing"><p class="meta">Loading plans...</p></div>
+      <div class="panel plans-foot">
+        <label for="email">Email for checkout and receipts</label>
         <input id="email" type="email" placeholder="you@example.com" autocomplete="email" />
         <div id="billingMsg"></div>
       </div>
     </div>
   </section>
 
-  <!-- agents -->
-  <section class="band alt" id="agents">
+  <section aria-labelledby="agents-title">
     <div class="wrap">
-      <p class="eyebrow">Built for humans and agents</p>
-      <h2 class="section">First-class agent surface</h2>
-      <p class="section-sub">The same engine an inbox uses is exposed to AI agents — discover it, call it, and buy credits programmatically.</p>
-      <div class="agentbox">
-        <div class="card">
-          <h3>🔌 MCP server</h3>
-          <p>Model Context Protocol tools over Streamable HTTP at <code>/mcp</code>, or run locally with <code>python -m mcp_server</code>. Dry-run by default; a gate violation surfaces as a tool error, never a silent success.</p>
-        </div>
-        <div class="card">
-          <h3>💳 Agentic Commerce (ACP)</h3>
-          <p>Agents buy one-time credit packs via the Agentic Commerce Protocol at <code>/acp/checkout_sessions</code> — idempotent and atomic. Subscriptions go through Stripe Checkout.</p>
-        </div>
-        <div class="card">
-          <h3>🧭 Discovery</h3>
-          <p>Self-describing at <a href="/.well-known/agent.json">/.well-known/agent.json</a>, <a href="/llms.txt">/llms.txt</a> and the MCP registry <a href="/server.json">server.json</a>. Point an agent at the host and it learns the rest.</p>
-        </div>
-        <div class="card">
-          <h3>🧾 Verifiable runs</h3>
-          <p>Every triage returns a <code>run_id</code>; fetch the signed receipt anytime at <code>GET /v1/audit/{run_id}</code>. Trust is checkable, not asserted.</p>
+      <div class="section-head">
+        <h2 id="agents-title">People + agents.</h2>
+        <p>One gate. Multiple surfaces.</p>
+      </div>
+      <div class="agent-grid">
+        <article class="agent-terminal">
+          <h3>Proof surface</h3>
+          <p>Preview first. Hold protected senders. Verify the run.</p>
+          <details class="agent-reveal">
+            <summary>Builders</summary>
+            <div class="terminal-lines" aria-label="Agent API proof examples">
+              <div><b>POST</b> /v1/senders/check -> protected: true, tier: 1</div>
+              <div><b>POST</b> /v1/triage/preview -> dry_run: true, violations: 0</div>
+              <div><b>GET</b> /v1/audit/run_7c9e -> signature: verified</div>
+            </div>
+          </details>
+          <details class="agent-reveal">
+            <summary>Commerce</summary>
+            <div class="terminal-lines" aria-label="Agent commerce examples">
+              <div><b>GET</b> /acp/feed.json -> credit packs and receipt policy</div>
+              <div><b>POST</b> /acp/checkout_sessions -> idempotent purchase</div>
+            </div>
+          </details>
+          <details class="agent-reveal">
+            <summary>Operators</summary>
+            <div class="terminal-lines" aria-label="Operator review examples">
+              <div><b>GET</b> /.well-known/agent.json -> capabilities</div>
+              <div><b>GET</b> /llms.txt -> prompt-safe product context</div>
+            </div>
+          </details>
+        </article>
+        <div class="agent-cards">
+          <details class="agent-card">
+            <summary><h3>MCP</h3></summary>
+            <p>Tools at <code>/mcp</code>. Local via <code>python -m mcp_server</code>.</p>
+          </details>
+          <details class="agent-card">
+            <summary><h3>ACP</h3></summary>
+            <p>Credit packs through <code>/acp/checkout_sessions</code>.</p>
+          </details>
+          <details class="agent-card">
+            <summary><h3>Discovery</h3></summary>
+            <p><a href="/.well-known/agent.json">agent.json</a>, <a href="/llms.txt">llms.txt</a>, <a href="/server.json">server.json</a>.</p>
+          </details>
+          <details class="agent-card">
+            <summary><h3>Receipts</h3></summary>
+            <p>Use <code>run_id</code>. Fetch <code>GET /v1/audit/{run_id}</code>.</p>
+          </details>
         </div>
       </div>
     </div>
   </section>
-
 </main>
 
 <footer>
-  <div class="wrap">
-    <div class="cols">
-      <div style="max-width:42ch">
-        <div style="font-weight:800;color:var(--ink);margin-bottom:6px">Universal Mail Automation</div>
-        <span class="pill">fail-closed</span>
-        <p style="margin-top:10px">The audit receipt is your Compliance Evidence Pack — proof of what was protected and what moved. Safety is never a paid feature.</p>
-      </div>
-      <div>
-        <strong style="color:var(--ink)">Product</strong>
-        <a href="#how">How it works</a>
-        <a href="#demo">Live demo</a>
-        <a href="#pricing">Pricing</a>
-      </div>
-      <div>
-        <strong style="color:var(--ink)">Developers</strong>
-        <a href="/docs">API reference</a>
-        <a href="/mcp">MCP endpoint</a>
-        <a href="/llms.txt">llms.txt</a>
-        <a href="/health">Health</a>
-      </div>
+  <div class="wrap footer-grid">
+    <div style="max-width: 44ch">
+      <strong>Universal Mail Automation</strong>
+      <p>Protected Inbox Audit for operators who need proof before cleanup, delegation, or automation.</p>
+    </div>
+    <div>
+      <strong>Product</strong>
+      <a href="#risk-check">Risk check</a>
+      <a href="#proof">Proof</a>
+      <a href="#plans">Plans</a>
+    </div>
+    <div>
+      <strong>Developers</strong>
+      <a href="/docs">API reference</a>
+      <a href="/mcp">MCP endpoint</a>
+      <a href="/health">Health</a>
     </div>
   </div>
 </footer>
@@ -567,7 +1046,7 @@ const SAMPLE_PLANS = [
     price_display: "$0",
     monthly_run_cap: 50,
     providers: "gmail",
-    blurb: "The full safety floor, free forever. Protected-sender gate + independent audit receipt, single provider, unlimited dry-runs.",
+    blurb: "The full safety floor, free forever. Protected-sender gate plus independent audit receipt, single provider, unlimited dry-runs.",
   },
   {
     id: "pro",
@@ -575,7 +1054,7 @@ const SAMPLE_PLANS = [
     price_display: "$19/mo",
     monthly_run_cap: 5000,
     providers: "all",
-    blurb: "All four providers, scheduled triage, downloadable + 90-day retained signed receipts.",
+    blurb: "All four providers, scheduled triage, downloadable and 90-day retained signed receipts.",
   },
   {
     id: "business",
@@ -583,7 +1062,7 @@ const SAMPLE_PLANS = [
     price_display: "$49/mo",
     monthly_run_cap: null,
     providers: "all",
-    blurb: "Unlimited runs, multi-mailbox, retained receipt history for compliance export, plus MCP + agent-commerce access.",
+    blurb: "Unlimited runs, multi-mailbox, retained receipt history for compliance export, plus MCP and agent-commerce access.",
   },
 ];
 
@@ -650,15 +1129,11 @@ function localPreviewResult() {
   return {
     dry_run: true,
     provider: $("provider").value,
-    receipt: "Triage receipt: 3 message(s) — 2 protected held in inbox, 1 would leave inbox, 0 labeled-inbox, 0 kept.",
+    receipt: "Triage receipt: 3 message(s) - 2 protected held in inbox, 1 would leave inbox, 0 labeled-inbox, 0 kept.",
     audit: { total: 3, protected_held: 2, archived: 1, moved: 0, labeled: 0, kept: 0, violations: [] },
     processed: { processed_count: 1, success_count: 1, error_count: 0, label_counts: { Marketing: 1 }, errors: [] },
     run_id: "demo_local_preview",
   };
-}
-
-function localPlans() {
-  return SAMPLE_PLANS;
 }
 
 async function postJSON(path, body) {
@@ -682,12 +1157,12 @@ function escapeHtml(s) {
   ));
 }
 
-// --- live sender check (no credentials) -------------------------------------
 $("checkBtn").addEventListener("click", async () => {
   const btn = $("checkBtn"), out = $("checkResult");
   const sender = $("sender").value.trim();
-  if (!sender) { out.innerHTML = ''; return; }
-  btn.disabled = true; out.innerHTML = '<p class="meta">Checking…</p>';
+  if (!sender) { out.innerHTML = ""; return; }
+  btn.disabled = true;
+  out.innerHTML = '<p class="meta">Checking...</p>';
   const { ok, status, data } = await postJSON("/v1/senders/check", { sender, subject: $("subject").value });
   btn.disabled = false;
   const payload = ok && data ? data : localSenderCheck(sender);
@@ -695,11 +1170,11 @@ $("checkBtn").addEventListener("click", async () => {
   const cat = payload.categorization || {};
   const tier = cat.tier != null ? `tier ${cat.tier}` : "";
   const label = cat.label ? `categorized as <strong>${escapeHtml(cat.label)}</strong>` : "";
-  const extra = [label, tier].filter(Boolean).join(" · ");
+  const extra = [label, tier].filter(Boolean).join(" / ");
   if (payload.protected) {
-    out.innerHTML = `<div class="verdict protected"><span class="icon">🛡️</span> Protected — this sender is never archived or moved.</div>${extra ? `<div class="meta">${extra}</div>` : ""}`;
+    out.innerHTML = `<div class="verdict protected"><span class="icon" aria-hidden="true"></span> Protected. Held.</div>${extra ? `<div class="meta">${extra}</div>` : ""}`;
   } else {
-    out.innerHTML = `<div class="verdict open"><span class="icon">✉️</span> Not protected — eligible for triage.</div>${extra ? `<div class="meta">${extra}</div>` : ""}`;
+    out.innerHTML = `<div class="verdict open"><span class="icon" aria-hidden="true"></span> Open. Eligible.</div>${extra ? `<div class="meta">${extra}</div>` : ""}`;
   }
 });
 
@@ -714,10 +1189,10 @@ document.querySelectorAll(".quick-picks button[data-sender]").forEach((btn) => {
   });
 });
 
-// --- dry-run triage preview -------------------------------------------------
 $("previewBtn").addEventListener("click", async () => {
   const btn = $("previewBtn"), out = $("previewResult");
-  btn.disabled = true; out.innerHTML = '<p class="meta">Previewing…</p>';
+  btn.disabled = true;
+  out.innerHTML = '<p class="meta">Previewing...</p>';
   const { ok, status, data } = await postJSON("/v1/triage/preview", {
     provider: $("provider").value, query: $("query").value, limit: parseInt($("limit").value, 10) || 50,
   });
@@ -725,21 +1200,22 @@ $("previewBtn").addEventListener("click", async () => {
   if (status === 503 || !ok || !data) {
     const fallback = localPreviewResult();
     out.innerHTML = `
-      <div class="notice warn">This share link is running in static mode. The live backend demo needs a connected server, but the preview still shows the intended disposition and receipt format.</div>
+      <div class="notice warn">Static mode. Showing sample proof.</div>
       <div class="receipt">${escapeHtml(fallback.receipt || "")}</div>
       <table>
         <tr><th>Disposition</th><th>Count</th></tr>
-        <tr><td>Protected — held in inbox</td><td class="held">${fallback.audit.protected_held}</td></tr>
+        <tr><td>Protected - held in inbox</td><td class="held">${fallback.audit.protected_held}</td></tr>
         <tr><td>Archived</td><td>${fallback.audit.archived}</td></tr>
         <tr><td>Moved</td><td>${fallback.audit.moved}</td></tr>
         <tr><td>Labeled</td><td>${fallback.audit.labeled}</td></tr>
         <tr><td>Kept</td><td>${fallback.audit.kept}</td></tr>
-        <tr><td>Gate violations</td><td class="violations-ok">0 — gate held</td></tr>
+        <tr><td>Gate violations</td><td class="violations-ok">0 - gate held</td></tr>
       </table>`;
     return;
   }
   if (status === 500 && data && /SAFETY GATE/.test(data.detail || "")) {
-    out.innerHTML = `<div class="notice err">${escapeHtml(data.detail)}</div>`; return;
+    out.innerHTML = `<div class="notice err">${escapeHtml(data.detail)}</div>`;
+    return;
   }
   const a = data.audit || {};
   const viol = (a.violations || []).length;
@@ -747,16 +1223,15 @@ $("previewBtn").addEventListener("click", async () => {
     <div class="receipt">${escapeHtml(data.receipt || "")}</div>
     <table>
       <tr><th>Disposition</th><th>Count</th></tr>
-      <tr><td>Protected — held in inbox</td><td class="held">${a.protected_held ?? 0}</td></tr>
+      <tr><td>Protected - held in inbox</td><td class="held">${a.protected_held ?? 0}</td></tr>
       <tr><td>Archived</td><td>${a.archived ?? 0}</td></tr>
       <tr><td>Moved</td><td>${a.moved ?? 0}</td></tr>
       <tr><td>Labeled</td><td>${a.labeled ?? 0}</td></tr>
       <tr><td>Kept</td><td>${a.kept ?? 0}</td></tr>
-      <tr><td>Gate violations</td><td class="${viol ? 'violations-bad' : 'violations-ok'}">${viol ? viol + ' ⚠️' : '0 — gate held'}</td></tr>
+      <tr><td>Gate violations</td><td class="${viol ? "violations-bad" : "violations-ok"}">${viol ? viol : "0 - gate held"}</td></tr>
     </table>`;
 });
 
-// --- pricing + checkout -----------------------------------------------------
 const PURCHASABLE = { pro: true, business: true };
 
 async function startCheckout(planId, btn) {
@@ -765,98 +1240,83 @@ async function startCheckout(planId, btn) {
   msg.innerHTML = "";
   if (!email || !/.+@.+\..+/.test(email)) {
     msg.innerHTML = `<div class="notice warn">Enter your email above first.</div>`;
-    $("email").focus(); return;
+    $("email").focus();
+    return;
   }
-  const prev = btn.textContent; btn.disabled = true; btn.textContent = "Redirecting…";
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Redirecting...";
   const { ok, status, data } = await postJSON("/v1/billing/checkout", { plan: planId, email });
   if (ok && data && data.url) { window.location.href = data.url; return; }
-  btn.disabled = false; btn.textContent = prev;
+  btn.disabled = false;
+  btn.textContent = prev;
   if (status === 503) {
-    msg.innerHTML = `<div class="notice warn">Billing isn't live on this server yet (Stripe keys not configured). The plan, gate and receipts all work — only the card step is pending setup.</div>`;
+    msg.innerHTML = `<div class="notice warn">Billing is not live on this server yet. The plan, gate, and receipts work; only card checkout is pending setup.</div>`;
   } else {
-    msg.innerHTML = `<div class="notice err">Couldn't start checkout (${status}). Try again shortly.</div>`;
+    msg.innerHTML = `<div class="notice err">Could not start checkout (${status}). Try again shortly.</div>`;
   }
 }
 
-(async () => {
+function renderPlans(plans, staticCheckout) {
   const out = $("plans");
+  out.innerHTML = "";
+  plans.forEach((p) => {
+    const cap = p.monthly_run_cap == null ? "Unlimited runs" : `${Number(p.monthly_run_cap).toLocaleString()} runs / mo`;
+    const card = document.createElement("div");
+    card.className = "plan" + (p.id === "pro" ? " feature" : "");
+    const buyable = PURCHASABLE[p.id];
+    card.innerHTML = `
+      <h3>${escapeHtml(p.name || p.id)}</h3>
+      <div class="price">${escapeHtml(p.price_display || "")}</div>
+      <details class="plan-reveal">
+        <summary>Details</summary>
+        <div class="plan-reveal-body">
+          <div class="blurb">${escapeHtml(p.blurb || "")}</div>
+          <ul>
+            <li>${escapeHtml(cap)}</li>
+            <li>Providers: ${escapeHtml(p.providers || "-")}</li>
+            <li>Gate and receipts</li>
+          </ul>
+        </div>
+      </details>`;
+    const btn = document.createElement("button");
+    btn.className = "btn " + (buyable ? "btn-primary" : "btn-secondary");
+    btn.textContent = buyable ? `Get ${p.name || p.id}` : "Start free";
+    if (buyable && !staticCheckout) {
+      btn.addEventListener("click", () => startCheckout(p.id, btn));
+    } else if (buyable) {
+      btn.addEventListener("click", () => {
+        $("billingMsg").innerHTML = `<div class="notice warn">This page is static. Connect a backend to start checkout.</div>`;
+        $("email").focus();
+      });
+    } else {
+      btn.addEventListener("click", () => { $("risk-check").scrollIntoView({ behavior: "smooth" }); });
+    }
+    card.appendChild(btn);
+    out.appendChild(card);
+  });
+  if (!plans.length) out.innerHTML = `<p class="meta">No plans available right now.</p>`;
+}
+
+(async () => {
   try {
     const r = await fetch(API_BASE + "/v1/billing/plans");
     if (!r.ok) throw new Error(r.status);
     const data = await r.json();
-    const plans = data.plans || [];
-    out.innerHTML = "";
-    plans.forEach((p) => {
-      const cap = p.monthly_run_cap == null ? "Unlimited runs" : `${Number(p.monthly_run_cap).toLocaleString()} runs / mo`;
-      const feature = p.id === "pro" ? " feature" : "";
-      const card = document.createElement("div");
-      card.className = "plan" + feature;
-      const buyable = PURCHASABLE[p.id];
-      card.innerHTML = `
-        <h3>${escapeHtml(p.name || p.id)}</h3>
-        <div class="price">${escapeHtml(p.price_display || "")}</div>
-        <div class="blurb">${escapeHtml(p.blurb || "")}</div>
-        <ul>
-          <li>${escapeHtml(cap)}</li>
-          <li>Providers: ${escapeHtml(p.providers || "—")}</li>
-          <li>Protected-sender gate &amp; signed receipts</li>
-        </ul>`;
-      const btn = document.createElement("button");
-      btn.className = "btn " + (buyable ? "btn-buy" : "btn-free");
-      btn.textContent = buyable ? `Get ${escapeHtml(p.name || p.id)}` : "Start free";
-      if (buyable) {
-        btn.addEventListener("click", () => startCheckout(p.id, btn));
-      } else {
-        btn.addEventListener("click", () => { $("demo").scrollIntoView(); });
-      }
-      card.appendChild(btn);
-      out.appendChild(card);
-    });
-    if (!plans.length) out.innerHTML = `<p class="meta">No plans available right now.</p>`;
+    renderPlans(data.plans || [], false);
   } catch (e) {
-    const plans = localPlans();
-    out.innerHTML = "";
-    plans.forEach((p) => {
-      const cap = p.monthly_run_cap == null ? "Unlimited runs" : `${Number(p.monthly_run_cap).toLocaleString()} runs / mo`;
-      const feature = p.id === "pro" ? " feature" : "";
-      const card = document.createElement("div");
-      card.className = "plan" + feature;
-      const buyable = PURCHASABLE[p.id];
-      card.innerHTML = `
-        <h3>${escapeHtml(p.name || p.id)}</h3>
-        <div class="price">${escapeHtml(p.price_display || "")}</div>
-        <div class="blurb">${escapeHtml(p.blurb || "")}</div>
-        <ul>
-          <li>${escapeHtml(cap)}</li>
-          <li>Providers: ${escapeHtml(p.providers || "—")}</li>
-          <li>Protected-sender gate &amp; signed receipts</li>
-        </ul>`;
-      const btn = document.createElement("button");
-      btn.className = "btn " + (buyable ? "btn-buy" : "btn-free");
-      btn.textContent = buyable ? `Get ${escapeHtml(p.name || p.id)}` : "Start free";
-      if (buyable) {
-        btn.addEventListener("click", () => {
-          $("billingMsg").innerHTML = `<div class="notice warn">This share link is static. Connect a backend to start checkout.</div>`;
-          $("email").focus();
-        });
-      } else {
-        btn.addEventListener("click", () => { $("demo").scrollIntoView({ behavior: "smooth" }); });
-      }
-      card.appendChild(btn);
-      out.appendChild(card);
-    });
+    renderPlans(SAMPLE_PLANS, true);
   }
 })();
 
-// Surface a billing return state (Stripe redirects back to /app/?billing=success|cancel).
 (function () {
   const q = new URLSearchParams(location.search);
   const b = q.get("billing");
   if (!b) return;
   const msg = $("billingMsg");
-  if (msg && b === "success") msg.innerHTML = `<div class="notice ok">✓ Subscription active — welcome aboard. Your receipts are now retained.</div>`;
-  if (msg && b === "cancel") msg.innerHTML = `<div class="notice warn">Checkout canceled — no charge made.</div>`;
-  if (b) document.getElementById("pricing").scrollIntoView();
+  if (msg && b === "success") msg.innerHTML = `<div class="notice ok">Subscription active. Receipt retention is enabled.</div>`;
+  if (msg && b === "cancel") msg.innerHTML = `<div class="notice warn">Checkout canceled. No charge made.</div>`;
+  document.getElementById("plans-title").scrollIntoView();
 })();
 </script>
 </body>
