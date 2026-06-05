@@ -60,21 +60,112 @@ def fetch_from_subject(imap: imaplib.IMAP4_SSL, uid: str):
     return decode_str(msg.get("From", "")), decode_str(msg.get("Subject", ""))
 
 
-def archive_uid(imap: imaplib.IMAP4_SSL, uid: str, archive_mailbox: str) -> bool:
-    """Move a message INBOX -> archive_mailbox. Prefer UID MOVE (RFC 6851);
-    fall back to COPY + \\Deleted + EXPUNGE if MOVE is unsupported."""
+# Characters that cannot legally appear in an RFC 3501 quoted-string: a
+# quoted-string is built from QUOTED-CHAR, which excludes CR, LF and NUL
+# entirely (RFC 3501 §4.3 / §9). Passing them through would let a CR/LF in a
+# mailbox name split the command stream and inject a forged IMAP command, so a
+# name carrying them is not safely encodable and we reject it (fail closed).
+_IMAP_FORBIDDEN = frozenset(chr(c) for c in range(0x20)) | frozenset("\x7f")
+
+
+def imap_quote(name: str) -> str:
+    """Wrap a mailbox name as an RFC 3501 quoted-string, backslash-escaping the
+    two characters special inside one (``\\`` and ``"``) and REJECTING control
+    characters. Without escaping, a name containing a quote breaks the command;
+    without rejecting CR/LF, attacker- or config-controlled text could inject
+    extra IMAP arguments (review U799/U800). A quoted-string cannot represent
+    CR/LF/NUL at all, so we raise rather than emit an injectable string."""
+    bad = sorted({c for c in name if c in _IMAP_FORBIDDEN})
+    if bad:
+        raise ValueError(
+            "mailbox name contains control character(s) that cannot be safely "
+            f"encoded as an IMAP quoted-string: {[hex(ord(c)) for c in bad]}")
+    return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _supports(imap: imaplib.IMAP4_SSL, capability: str) -> bool:
+    """True iff the server advertised ``capability``. imaplib populates
+    ``.capabilities`` (a tuple of upper-case names) at connect/login; fall back
+    to an explicit CAPABILITY query if that attribute is unavailable. Matching
+    is exact-token (not substring) so e.g. ``UIDPLUS`` never misfires on a bare
+    ``UID`` token, nor ``MOVE`` on ``X-REMOVE``."""
+    want = capability.upper().encode()
+    caps = getattr(imap, "capabilities", None)
+    if caps:
+        return want in {str(c).upper().encode() for c in caps}
     try:
-        res, _ = imap.uid("MOVE", uid, f'"{archive_mailbox}"')
-        if res == "OK":
-            return True
-    except imaplib.IMAP4.error:
-        pass
-    res, _ = imap.uid("COPY", uid, f'"{archive_mailbox}"')
-    if res != "OK":
+        res, data = imap.capability()
+    except Exception:
         return False
-    imap.uid("STORE", uid, "+FLAGS", r"(\Deleted)")
-    imap.expunge()
-    return True
+    if res != "OK" or not data:
+        return False
+    tokens = {t.upper() for x in data if isinstance(x, (bytes, bytearray))
+              for t in x.split()}
+    return want in tokens
+
+
+def archive_uid(imap: imaplib.IMAP4_SSL, uid: str, archive_mailbox: str) -> str:
+    """Move ONE message INBOX -> archive_mailbox, returning an outcome string:
+
+      "moved"              - the message is in Archive and gone from the source
+                             (atomic UID MOVE, or COPY + scoped UID EXPUNGE).
+      "copied_not_removed" - an archive copy exists but the original could not be
+                             SAFELY removed; it is left flagged \\Deleted in place
+                             (a recoverable duplicate), NOT expunged.
+      "failed"             - nothing changed; the original is untouched.
+
+    CRITICAL (review U006): this function NEVER issues a mailbox-wide EXPUNGE.
+    A bare ``imap.expunge()`` removes EVERY \\Deleted-flagged message in the
+    mailbox (RFC 3501 semantics), so the old COPY + STORE + expunge() fallback
+    could permanently destroy unrelated mail the user (or another tool) had
+    flagged. We only ever delete scoped to THIS uid via UID EXPUNGE (RFC 4315 /
+    UIDPLUS); if the server advertises neither MOVE nor UIDPLUS we decline to
+    delete and report "copied_not_removed" rather than risk data loss."""
+    dest = imap_quote(archive_mailbox)
+
+    # Preferred: atomic, server-side UID MOVE (RFC 6851). When the server
+    # supports MOVE we trust its result and never fall through to COPY — a
+    # non-OK MOVE that fell through would leave the original AND create a copy
+    # (duplicate), review U801.
+    if _supports(imap, "MOVE"):
+        try:
+            res, _ = imap.uid("MOVE", uid, dest)
+        except imaplib.IMAP4.error:
+            res = "NO"
+        return "moved" if res == "OK" else "failed"
+
+    # Fallback path: COPY, then flag the original \\Deleted, then scoped expunge.
+    try:
+        res, _ = imap.uid("COPY", uid, dest)
+    except imaplib.IMAP4.error:
+        res = "NO"
+    if res != "OK":
+        return "failed"  # nothing copied; original untouched
+
+    # The archive copy now exists. Flag the original for deletion, checking the
+    # result (review U358/U359) — an unchecked STORE could leave us reporting
+    # success while the message stays put.
+    try:
+        sres, _ = imap.uid("STORE", uid, "+FLAGS", r"(\Deleted)")
+    except imaplib.IMAP4.error:
+        sres = "NO"
+    if sres != "OK":
+        return "copied_not_removed"  # copy made; couldn't flag original -> dup
+
+    # Remove ONLY this message. UID EXPUNGE (RFC 4315) is scoped to the given
+    # UID set; the bare EXPUNGE we refuse to call would be mailbox-wide.
+    if _supports(imap, "UIDPLUS"):
+        try:
+            eres, _ = imap.uid("EXPUNGE", uid)
+        except imaplib.IMAP4.error:
+            eres = "NO"
+        return "moved" if eres == "OK" else "copied_not_removed"
+
+    # No UIDPLUS: there is no way to expunge a single message without a
+    # mailbox-wide EXPUNGE, so we decline. The original stays flagged \\Deleted
+    # (a duplicate the user can reconcile), which is strictly safer than
+    # destroying every other \\Deleted message in the mailbox.
+    return "copied_not_removed"
 
 
 def main():
@@ -86,6 +177,14 @@ def main():
     ap.add_argument("--apply", action="store_true", help="actually MOVE archivable noise (default: dry run)")
     ap.add_argument("--sample", type=int, default=4, help="sample senders to show per bucket in dry run")
     args = ap.parse_args()
+
+    # Fail closed on an un-encodable archive mailbox name BEFORE touching the
+    # server, rather than raising mid-loop after some messages have moved.
+    try:
+        imap_quote(args.archive_mailbox)
+        imap_quote(args.mailbox)
+    except ValueError as exc:
+        sys.exit(f"Invalid mailbox name: {exc}")
 
     host = os.getenv("ICLOUD_IMAP_HOST") or os.getenv("IMAP_HOST") or "imap.mail.me.com"
     user = os.getenv("ICLOUD_IMAP_USER") or os.getenv("IMAP_USER")
@@ -157,13 +256,23 @@ def main():
             return
 
         print(f"\n--- APPLYING: moving {len(archivable)} -> {args.archive_mailbox!r} ---")
-        moved, failed = 0, 0
+        moved, copied_not_removed, failed = 0, 0, 0
         for uid, label, _frm in archivable:
-            if archive_uid(imap, uid, args.archive_mailbox):
+            outcome = archive_uid(imap, uid, args.archive_mailbox)
+            if outcome == "moved":
                 moved += 1
+            elif outcome == "copied_not_removed":
+                copied_not_removed += 1
             else:
                 failed += 1
-        print(f"DONE. Moved {moved}, failed {failed}. Protected untouched: {len(protected)}.")
+        print(f"DONE. Moved {moved}, copied-not-removed {copied_not_removed}, "
+              f"failed {failed}. Protected untouched: {len(protected)}.")
+        if copied_not_removed:
+            print(f"  NOTE: {copied_not_removed} message(s) were COPIED to "
+                  f"{args.archive_mailbox!r} but left flagged \\Deleted in the source")
+            print("        because the server advertises neither MOVE nor UIDPLUS. They are")
+            print("        NOT auto-expunged — a mailbox-wide EXPUNGE would delete unrelated")
+            print("        \\Deleted mail. Expunge the source manually if you want them gone.")
     finally:
         try:
             imap.logout()

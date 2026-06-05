@@ -342,12 +342,18 @@ class OutlookProvider(EmailProvider):
 
         url = f"{GRAPH_API_BASE}/me/messages/{message_id}"
 
-        # Get current categories first
+        # Get current categories first. A failed GET must FAIL the apply —
+        # falling back to current_cats=[] fabricated an empty list that the
+        # PATCH below then wrote back, CLOBBERING every category already on
+        # the message (review U097).
         try:
             msg = self._api_get(url, params={"$select": "categories"})
             current_cats = msg.get("categories", [])
-        except Exception:
-            current_cats = []
+        except Exception as e:
+            logger.error(
+                f"Failed to read current categories for {message_id}; "
+                f"not applying '{category}' (would overwrite them): {e}")
+            return False
 
         # Add new category if not already present
         if category not in current_cats:
@@ -433,11 +439,16 @@ class OutlookProvider(EmailProvider):
             if query:
                 params["$filter"] = query
 
+        # Propagate failures: an auth/network/throttle error here must NOT
+        # become an empty result — the CLI reads empty as "no more messages"
+        # and reports a silently-truncated run as success (review U097). The
+        # CLI's top-level handler logs, saves resumption state and re-raises,
+        # which is the contract the Gmail provider already follows.
         try:
             result = self._api_get(url, params=params)
         except Exception as e:
             logger.error(f"Failed to list messages: {e}")
-            return ListMessagesResult(messages=[])
+            raise
 
         messages = []
         for msg in result.get("value", []):
@@ -477,11 +488,20 @@ class OutlookProvider(EmailProvider):
         url = f"{GRAPH_API_BASE}/me/messages/{message_id}"
         params = {"$select": "id,subject,from,isRead,flag,receivedDateTime,parentFolderId"}
 
+        # None means NOT FOUND (the documented Optional contract) — only a
+        # 404 may produce it. Any other failure (401/429/5xx/network) must
+        # raise: returning None made the CLI silently skip the message, and
+        # an expired token skipped EVERY message while the run "succeeded"
+        # (review U097).
         try:
             msg = self._api_get(url, params=params)
         except Exception as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status == 404:
+                logger.warning(f"Message {message_id} not found (404)")
+                return None
             logger.error(f"Failed to get message {message_id}: {e}")
-            return None
+            raise
 
         sender = ""
         if msg.get("from", {}).get("emailAddress"):
