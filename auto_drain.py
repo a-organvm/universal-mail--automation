@@ -12,8 +12,12 @@ LEGACY/STANDALONE — moves between category labels (out of Misc/Other), NOT out
 INBOX, and does NOT enforce the protected-sender gate (core.rules.is_protected_
 sender). Misroute risk only, not a never-archive breach. Do NOT extend it to
 remove INBOX without adopting that gate first.
+
+DRY RUN by default (no changes; one analysis pass). Pass --apply to actually
+perform the bulk label moves — same convention as icloud_triage.py.
 """
 
+import argparse
 import re
 import time
 import logging
@@ -87,11 +91,22 @@ def classify_domain(domain, subjects):
     
     return "Notification" # Aggressive fallback to clear inbox
 
-def drain_loop():
-    service = get_service()
+def drain_loop(service=None, apply=False):
+    """Drain ``Misc/Other`` into category labels.
+
+    apply=False (the default) is a DRY RUN: one sample-and-classify pass that
+    logs the planned domain->category moves WITHOUT calling batchModify, then
+    exits. The bulk move only runs with apply=True (CLI: --apply) — review
+    U045: this script used to execute immediately on invocation, with no
+    guard, unlike its sibling icloud_triage.py.
+    """
+    if service is None:
+        service = get_service()
+    logger.info("MODE: %s", "APPLY (will bulk-move labels)" if apply
+                else "DRY RUN (no changes)")
     labels = get_label_ids(service)
     source_id = labels.get(TARGET_SOURCE)
-    
+
     if not source_id:
         logger.error(f"Source label {TARGET_SOURCE} not found.")
         return
@@ -149,8 +164,18 @@ def drain_loop():
                 # Create label if missing (shouldn't happen with our standard set, but safety)
                 continue
                 
+            if not apply:
+                # Dry run: report the plan only — no search-and-move. (The
+                # bulk move is what U045 guards; even the per-domain search
+                # is skipped to keep the dry run a single cheap read pass.)
+                logger.info(
+                    f"[DRY RUN] would bulk-move from:{domain} "
+                    f"label:{TARGET_SOURCE} -> {target_cat} "
+                    f"({len(subjs)} in sample)")
+                continue
+
             logger.info(f"Processing Domain: {domain} ({len(subjs)} sample items) -> {target_cat}")
-            
+
             # BULK SEARCH & MOVE
             # We move *ALL* mail from this domain, not just the sample.
             # This is the "Macro" move.
@@ -187,6 +212,14 @@ def drain_loop():
             
             print("") # Newline
             
+        if not apply:
+            # Nothing was moved, so the source bucket can never empty: a
+            # dry run is exactly ONE analysis pass, never a loop.
+            logger.info(
+                "Dry run complete — no changes made. "
+                "Re-run with --apply to perform the moves above.")
+            break
+
         if moves_performed == 0:
             logger.info("No moves performed in this iteration. We might be hitting the long tail.")
             # If we categorized everything in the sample but they were singletons, we might loop forever.
@@ -194,9 +227,20 @@ def drain_loop():
             # If we are here, it means the sample contains domains we failed to move?
             # Or sample was just empty?
             pass
-            
+
         iteration += 1
         time.sleep(2) # Breath
 
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        description="Drain Misc/Other into category labels (dry run by default).")
+    ap.add_argument(
+        "--apply", action="store_true",
+        help="actually perform the bulk label moves (default: dry run)")
+    args = ap.parse_args(argv)
+    drain_loop(apply=args.apply)
+
+
 if __name__ == "__main__":
-    drain_loop()
+    main()

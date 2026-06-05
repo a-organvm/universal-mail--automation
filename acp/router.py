@@ -97,6 +97,24 @@ def _request_hash(raw: bytes) -> str:
     return hashlib.sha256(raw or b"").hexdigest()
 
 
+def _key_hash(api_key: str) -> str:  # allow-secret: parameter name, not a value
+    """Stable hash of the caller's bearer key. Bound to a session at creation so
+    only the creator can update/cancel/complete it, and so completion credits the
+    CREATOR's account — never a different bearer that happens to call /complete
+    (review U010). The raw key is never stored on the session."""
+    return hashlib.sha256((api_key or "").encode("utf-8")).hexdigest()
+
+
+def _require_owner(ctx: GateContext, row: dict) -> None:
+    """Only the bearer that CREATED a session may act on it. Sessions created
+    before binding existed (no creator_key_hash) are not gated, for back-compat."""
+    expected = row["data"].get("creator_key_hash")
+    if expected is not None and _key_hash(ctx.api_key) != expected:
+        raise ACPError(403, "session_owner_mismatch",
+                       "this checkout session belongs to a different account",
+                       "Authorization")
+
+
 def _begin_idempotency(ctx: GateContext, raw: bytes, scope: str) -> Optional[dict]:
     """Claim the idempotency key. Returns the stored response on replay (caller
     returns it with Idempotent-Replayed: true), None to proceed. Raises ACPError
@@ -134,6 +152,17 @@ def _new_session_id() -> str:
     return "acp_cs_" + secrets.token_hex(16)
 
 
+def _order_id_for(session_id: str) -> str:
+    """Deterministic order id for a checkout session.
+
+    Derived (one-way) from the session id so that the first attempt and any
+    crash-recovery retry — even concurrent ones — mint the SAME receipt row,
+    making one-receipt-per-paid-session a structural invariant rather than a
+    locking discipline. Knowing the order id does not reveal the session id."""
+    digest = hashlib.sha256(f"acp-order:{session_id}".encode()).hexdigest()
+    return "order_" + digest[:24]
+
+
 def _shape(
     request: Request, *, session_id: str, status: str, line_items: list,
     buyer: Optional[dict], order: Optional[dict] = None,
@@ -147,12 +176,47 @@ def _shape(
 
 
 def _persist(session_id: str, response: dict, total_runs: int,
-             account_id: Optional[str] = None) -> None:
+             account_id: Optional[str] = None,
+             creator_key_hash: Optional[str] = None,
+             charge_attempted: Optional[bool] = None) -> None:
+    """Persist the session row.
+
+    ``charge_attempted`` marks that a Stripe charge is about to be (or may
+    have been) attempted for this session. It is written (True) immediately
+    BEFORE the charge call; while set, update/cancel are refused: the captured
+    charge and the credit are keyed to the session's CURRENT contents, and
+    mutating them would make the recovered order receipt lie about what was
+    actually paid. ONLY the 402 payment-failed branch clears it (False) — the
+    charge definitively failed, so the session is safely mutable again. The
+    default (None) PRESERVES whatever the row already says, so no incidental
+    persist (a stale concurrent update, the completion write) can ever drop
+    the freeze by omission."""
+    if charge_attempted is None:
+        existing = get_store().get_session(session_id)
+        charge_attempted = bool(
+            existing and existing["data"].get("charge_attempted"))
     get_store().save_session(
         session_id=session_id, status=response["status"], currency=CURRENCY,
         account_id=account_id,
-        data={"response": response, "total_runs": total_runs},
+        data={"response": response, "total_runs": total_runs,
+              "creator_key_hash": creator_key_hash,
+              "charge_attempted": charge_attempted},
     )
+
+
+def _require_not_charged(session_id: str, row: dict, action: str) -> None:
+    """Refuse ``action`` once money may have moved for this session.
+
+    Two independent signals, either suffices: the pre-charge marker (covers a
+    crash anywhere from the charge call onward, even before fulfillment) and
+    the fulfillment row (covers credit actually applied). A session in this
+    state is finished by RETRYING /complete — never by mutating it."""
+    if row["data"].get("charge_attempted") or \
+            get_store().get_fulfillment(session_id) is not None:
+        raise ACPError(
+            400, "invalid_state",
+            f"a payment may already be captured for this session; it cannot "
+            f"be {action} — retry /complete to finish it", "status")
 
 
 def _load(session_id: str) -> dict:
@@ -185,7 +249,7 @@ async def create_session(body: models.CheckoutCreate, request: Request):
                   line_items=line_items,
                   buyer=body.buyer.model_dump() if body.buyer else None,
                   messages=messages)
-    _persist(session_id, resp, total_runs)
+    _persist(session_id, resp, total_runs, creator_key_hash=_key_hash(ctx.api_key))
     _complete_idempotency(ctx, resp)
     return JSONResponse(resp)
 
@@ -207,11 +271,13 @@ async def update_session(session_id: str, body: models.CheckoutUpdate,
         return JSONResponse(replay, headers={"Idempotent-Replayed": "true"})
 
     row = _load(session_id)
+    _require_owner(ctx, row)
     current = row["data"]["response"]
     if current["status"] in (models.STATUS_COMPLETED, models.STATUS_CANCELED,
                              models.STATUS_EXPIRED):
         raise ACPError(400, "invalid_state",
                        f"cannot update a {current['status']} session", "status")
+    _require_not_charged(session_id, row, "updated")
 
     # Re-derive line items if items were supplied, else keep the existing ones.
     if body.items is not None:
@@ -227,7 +293,8 @@ async def update_session(session_id: str, body: models.CheckoutUpdate,
     buyer = body.buyer.model_dump() if body.buyer else current.get("buyer")
     resp = _shape(request, session_id=session_id, status=status,
                   line_items=line_items, buyer=buyer)
-    _persist(session_id, resp, total_runs)
+    _persist(session_id, resp, total_runs,
+             creator_key_hash=row["data"].get("creator_key_hash"))
     _complete_idempotency(ctx, resp)
     return JSONResponse(resp)
 
@@ -242,8 +309,10 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
         return JSONResponse(replay, headers={"Idempotent-Replayed": "true"})
 
     row = _load(session_id)
+    _require_owner(ctx, row)
     current = row["data"]["response"]
     total_runs = row["data"]["total_runs"]
+    creator_key_hash = row["data"].get("creator_key_hash")
 
     if current["status"] == models.STATUS_COMPLETED:
         # Already fulfilled — return the completed session idempotently.
@@ -255,6 +324,15 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
                        "status")
 
     amount = models.grand_total(current["line_items"])
+    # FREEZE the session before touching money: from here on a charge may
+    # exist (even if we crash mid-call), and the captured amount is keyed to
+    # the session's CURRENT contents. update/cancel refuse while this marker
+    # is set, so a crash-recovery retry always re-reads the exact line items
+    # the charge was made against — the recovered receipt cannot lie. The 402
+    # branch below clears it (charge definitively failed, safely mutable
+    # again).
+    _persist(session_id, current, total_runs,
+             creator_key_hash=creator_key_hash, charge_attempted=True)
     # Charge the delegated token (fail-closed: NullPaymentClient refuses). The
     # charge idempotency key is derived from the SESSION id, not the endpoint
     # Idempotency-Key — so even if a caller retries /complete with a fresh
@@ -275,7 +353,10 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
                       buyer=(body.buyer.model_dump() if body.buyer
                              else current.get("buyer")),
                       messages=messages)
-        _persist(session_id, resp, total_runs)
+        # The ONLY explicit clear of the freeze marker: the charge
+        # definitively failed, so the session is safely mutable again.
+        _persist(session_id, resp, total_runs, creator_key_hash=creator_key_hash,
+                 charge_attempted=False)
         _complete_idempotency(ctx, resp)
         return JSONResponse(resp, status_code=402)
 
@@ -292,8 +373,15 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
     base = str(request.base_url).rstrip("/")
     order = current.get("order")
     messages = None
-    if fulfilled:
-        order_id = "order_" + secrets.token_hex(12)
+
+    def _mint_order() -> dict:
+        """Sign and persist the order receipt; return the order object.
+
+        The order id is DETERMINISTIC per session, so every mint attempt —
+        first try, crash-recovery retry, even concurrent ones — writes the
+        same receipt row (save_receipt is INSERT OR REPLACE on run_id):
+        exactly one receipt per paid session, with no locking."""
+        order_id = _order_id_for(session_id)
         order_receipt_body = {
             "run_id": order_id,
             "provider": "acp",
@@ -315,18 +403,41 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
             dry_run=False, receipt_line=order_receipt_body["receipt_line"],
             signature=signature, account_id=account["id"],
         )
-        order = {
+        return {
             "id": order_id,
             "checkout_session_id": session_id,
             "permalink_url": f"{base}/v1/audit/{order_id}",
         }
+
+    if fulfilled:
+        order = _mint_order()
     elif order is None:
+        # The credit was applied by an EARLIER attempt that crashed before the
+        # order was recorded (reviews U018/U110/U032: any raise between
+        # fulfill_once and _persist left money captured, credit committed, and
+        # the order permanently unrecorded — this branch used to shrug with
+        # "already_fulfilled" and never mint the receipt). The charge above was
+        # deduped by Stripe (per-session idempotency key), so result.payment_id
+        # is the ORIGINAL payment — CONVERGE: reattach the receipt if it was
+        # saved before the crash, otherwise mint it now. Either way the retry
+        # ends in a completed session with exactly one receipt and no
+        # duplicate charge or credit.
+        existing = store.get_receipt(_order_id_for(session_id))
+        if existing is not None:
+            order = {
+                "id": existing["run_id"],
+                "checkout_session_id": session_id,
+                "permalink_url": f"{base}/v1/audit/{existing['run_id']}",
+            }
+        else:
+            order = _mint_order()
         messages = [{
             "type": "info",
-            "code": "already_fulfilled",
+            "code": "order_recovered",
             "content_type": "plain",
             "text": "Credits were already fulfilled for this checkout session; "
-                    "no duplicate order receipt was minted.",
+                    "the order receipt was recovered without a duplicate "
+                    "charge or credit.",
         }]
 
     resp = _shape(request, session_id=session_id, status=models.STATUS_COMPLETED,
@@ -334,7 +445,8 @@ async def complete_session(session_id: str, body: models.CheckoutComplete,
                   buyer=(body.buyer.model_dump() if body.buyer
                          else current.get("buyer")),
                   order=order, messages=messages)
-    _persist(session_id, resp, total_runs, account_id=account["id"])
+    _persist(session_id, resp, total_runs, account_id=account["id"],
+             creator_key_hash=creator_key_hash)
     _complete_idempotency(ctx, resp)
     return JSONResponse(resp)
 
@@ -348,12 +460,15 @@ async def cancel_session(session_id: str, request: Request):
         return JSONResponse(replay, headers={"Idempotent-Replayed": "true"})
 
     row = _load(session_id)
+    _require_owner(ctx, row)
     current = row["data"]["response"]
     if current["status"] == models.STATUS_COMPLETED:
         raise ACPError(400, "invalid_state", "cannot cancel a completed session",
                        "status")
+    _require_not_charged(session_id, row, "canceled")
     resp = _shape(request, session_id=session_id, status=models.STATUS_CANCELED,
                   line_items=current["line_items"], buyer=current.get("buyer"))
-    _persist(session_id, resp, row["data"]["total_runs"])
+    _persist(session_id, resp, row["data"]["total_runs"],
+             creator_key_hash=row["data"].get("creator_key_hash"))
     _complete_idempotency(ctx, resp)
     return JSONResponse(resp)

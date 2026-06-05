@@ -200,7 +200,9 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
             r"hrblock",
             r"taxact",
             r"taxslayer",
-            r"irs\.gov",
+            # irs.gov deliberately NOT here: mail from the IRS itself is
+            # Personal/Government (tier 1 Critical), not tax-software vendor
+            # mail (review U065). Vendor patterns only.
             r"taxrise",
         ],
         "priority": 8,
@@ -477,7 +479,13 @@ LABEL_RULES: Dict[str, Dict[str, Any]] = {
             r"dmv",
             r"state\.fl\.us",
         ],
-        "priority": 17,
+        # Government mail is tier-1 Critical, so its priority must OUTRANK
+        # every overlapping lower-tier rule. At the old 17 it lost to
+        # Finance/Tax (8: irs.gov demoted to tier 2) and tied with Marketing
+        # (17: an ssa.gov newsletter demoted to tier 4 by dict order alone) —
+        # reviews U064/U065. 4 sits below the Dev rules (no .gov overlap)
+        # and above everything a government sender can also match.
+        "priority": 4,
         "tier": 1,  # Critical - government matters
         "time_sensitive": True,
     },
@@ -597,7 +605,10 @@ def _load_local_protected() -> Tuple[List[str], set]:
     domains: List[str] = []
     selfs: set = set()
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        # errors="replace": a non-UTF-8 byte must NOT raise UnicodeDecodeError and
+        # crash the import (disabling the whole gate). Bad bytes degrade to U+FFFD
+        # in that one line (which then matches nothing); every clean line still loads.
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
             for raw in fh:
                 line = raw.split("#", 1)[0].strip()
                 if not line:
@@ -609,6 +620,11 @@ def _load_local_protected() -> Tuple[List[str], set]:
                 else:
                     domains.append(line.lower())
     except (FileNotFoundError, OSError):
+        pass
+    except Exception:
+        # Belt-and-suspenders: a malformed local config must NEVER crash the gate's
+        # import (honors this function's documented "Never raises" contract). Fall
+        # back to whatever parsed cleanly plus the shipped example defaults.
         pass
     return domains, selfs
 
@@ -1023,17 +1039,24 @@ def categorize_with_tier(sender: str, subject: str) -> CategorizationResult:
 
 
 def _find_best_label(combined_text: str) -> str:
-    """Find the best matching label for combined sender+subject text."""
+    """Find the best matching label for combined sender+subject text.
+
+    Equal-priority matches tie-break on TIER (1=Critical first), never on
+    dict-insertion order: with strict priority-only comparison a tier-1 rule
+    sharing its priority with an earlier-inserted tier-4 rule silently lost —
+    e.g. an ssa.gov notice containing the word "newsletter" was filed as
+    Marketing/Reference instead of Government/Critical (review U064)."""
     best_match = None
-    best_priority = 9999
+    best_key = (9999, 9)  # (priority, tier): lower wins on both axes
 
     for label_name, rule_config in LABEL_RULES.items():
         for pattern in rule_config["patterns"]:
             if re.search(pattern, combined_text, re.IGNORECASE):
-                if rule_config["priority"] < best_priority:
+                key = (rule_config["priority"], rule_config.get("tier", 4))
+                if key < best_key:
                     best_match = label_name
-                    best_priority = rule_config["priority"]
-                    break
+                    best_key = key
+                break
 
     return best_match or "Misc/Other"
 

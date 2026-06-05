@@ -388,6 +388,14 @@ class Store:
             self._conn.commit()
             return True
 
+    def get_fulfillment(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """The fulfillment row for ``session_id``, or None if never fulfilled.
+
+        Existence means the credit was committed: the session's money state is
+        no longer mutable (update/cancel are refused by the ACP router)."""
+        return self._fetch_one(
+            "SELECT * FROM acp_fulfillments WHERE session_id = ?", (session_id,))
+
     # -- ACP sessions -------------------------------------------------------
     def save_session(
         self,
