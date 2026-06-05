@@ -597,7 +597,10 @@ def _load_local_protected() -> Tuple[List[str], set]:
     domains: List[str] = []
     selfs: set = set()
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        # errors="replace": a non-UTF-8 byte must NOT raise UnicodeDecodeError and
+        # crash the import (disabling the whole gate). Bad bytes degrade to U+FFFD
+        # in that one line (which then matches nothing); every clean line still loads.
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
             for raw in fh:
                 line = raw.split("#", 1)[0].strip()
                 if not line:
@@ -609,6 +612,11 @@ def _load_local_protected() -> Tuple[List[str], set]:
                 else:
                     domains.append(line.lower())
     except (FileNotFoundError, OSError):
+        pass
+    except Exception:
+        # Belt-and-suspenders: a malformed local config must NEVER crash the gate's
+        # import (honors this function's documented "Never raises" contract). Fall
+        # back to whatever parsed cleanly plus the shipped example defaults.
         pass
     return domains, selfs
 
