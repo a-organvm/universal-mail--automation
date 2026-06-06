@@ -41,6 +41,8 @@ class EmailMessage:
         is_starred: Whether the message is starred/flagged
         priority_tier: Eisenhower matrix tier (1=Critical, 2=Important, 3=Delegate, 4=Reference)
         categories: Color categories (Outlook)
+        snippet: Short preview of the body (provider-supplied, optional)
+        body: Full plain-text body when fetched (optional; used for research)
     """
     id: str
     sender: str
@@ -51,11 +53,24 @@ class EmailMessage:
     is_starred: bool = False
     priority_tier: Optional[int] = None
     categories: Set[str] = field(default_factory=set)
+    snippet: str = ""
+    body: str = ""
 
     @property
     def combined_text(self) -> str:
         """Returns sender + subject combined for pattern matching."""
         return f"{self.sender} {self.subject}".lower()
+
+    @property
+    def content_text(self) -> str:
+        """
+        Returns the richest available text for context research:
+        subject plus body (preferred) or snippet. Used by core.research.
+        """
+        detail = self.body.strip() or self.snippet.strip()
+        if detail:
+            return f"{self.subject}\n\n{detail}".strip()
+        return self.subject
 
 
 @dataclass

@@ -36,6 +36,20 @@ from core.rules import (
     partition_protected,
     normalize_sender,
 )
+from core.research import ResearchDossier, research_message
+from core.voice import (
+    VoiceProfile,
+    learn_voice_profile,
+    default_voice_profile,
+    load_voice_profile,
+    save_voice_profile,
+)
+from core.triage import (
+    TriageItem,
+    triage_messages,
+    score_priority,
+    render_triage,
+)
 from core.state import StateManager
 from core.config import Config, load_config, create_sample_config
 
@@ -71,6 +85,17 @@ __all__ = [
     "is_archivable",
     "partition_protected",
     "normalize_sender",
+    "ResearchDossier",
+    "research_message",
+    "VoiceProfile",
+    "learn_voice_profile",
+    "default_voice_profile",
+    "load_voice_profile",
+    "save_voice_profile",
+    "TriageItem",
+    "triage_messages",
+    "score_priority",
+    "render_triage",
     "StateManager",
     "Config",
     "load_config",
