@@ -39,6 +39,7 @@
 - [CLI Reference](#cli-reference)
   - [Labeling Commands](#labeling-commands)
   - [Reporting Commands](#reporting-commands)
+  - [Triage Commands](#triage-commands)
   - [Health and Diagnostics](#health-and-diagnostics)
 - [Configuration](#configuration)
   - [Configuration Precedence](#configuration-precedence)
@@ -296,7 +297,7 @@ python3 cli.py label --provider imap --host imap.mail.me.com
 
 ## CLI Reference
 
-The CLI (`cli.py`) is built on `argparse` and provides five subcommands, each accepting a `--provider` flag to target a specific email service.
+The CLI (`cli.py`) is built on `argparse` and provides six subcommands, each accepting a `--provider` flag to target a specific email service.
 
 ### Labeling Commands
 
@@ -337,6 +338,24 @@ python3 cli.py escalate --provider outlook --dry-run
 
 # Re-triage and apply escalations
 python3 cli.py escalate --provider gmail
+```
+
+### Triage Commands
+
+```bash
+# Research, prioritize, and rank the mailbox (top 20 items)
+python3 cli.py triage --provider gmail --top 20
+
+# Triage with voice-matched reply drafts for items needing a response
+python3 cli.py triage --provider gmail --top 20 --draft --name "Anthony"
+
+# Use a saved voice profile / sent-mail corpus for drafting
+python3 cli.py triage --provider gmail --draft \
+    --voice-file ~/.config/mail_automation/voice.json \
+    --samples-file ~/.config/mail_automation/sent_samples.txt
+
+# Machine-readable output for downstream tooling
+python3 cli.py triage --provider outlook --format json --limit 100
 ```
 
 ### Health and Diagnostics

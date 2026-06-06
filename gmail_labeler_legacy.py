@@ -500,9 +500,20 @@ def verify_labeling_complete(service):
 
 def main():
     """Main execution function."""
+    import warnings
+
+    warnings.warn(
+        "gmail_labeler_legacy.py is DEPRECATED: it does not enforce the "
+        "protected-sender gate (core.rules.is_protected_sender). "
+        "Use `python3 cli.py label --provider gmail` instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     print("=" * 70)
     print(" Gmail Archive Exhaustive Labeling System")
-    print(" Purpose: Label all emails systematically")
+    print(" ⚠️  DEPRECATED — use `python3 cli.py label --provider gmail` instead.")
+    print("     This script lacks the protected-sender gate and relabel-only")
+    print("     safety checks enforced by the unified CLI.")
     print("=" * 70)
 
     print("\n🔐 Authenticating with Gmail API...")

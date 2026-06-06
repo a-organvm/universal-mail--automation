@@ -270,8 +270,12 @@ class OutlookProvider(EmailProvider):
                 full_name = f"{parent_name}/{folder['displayName']}"
                 self._folder_cache[full_name] = folder["id"]
                 self._fetch_child_folders(folder["id"], full_name)
-        except Exception:
-            pass  # Ignore errors for child folders
+        except Exception as e:
+            # Non-fatal: a missing subtree only degrades folder routing, but the
+            # user must be able to see WHICH subtree was skipped and why.
+            logger.warning(
+                f"Failed to fetch child folders under '{parent_name}': {e}"
+            )
 
     def _init_category_cache(self) -> None:
         """Pre-fetch master categories."""
