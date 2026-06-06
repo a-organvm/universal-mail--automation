@@ -31,14 +31,99 @@
     --shadow: 0 18px 50px rgba(17, 22, 28, .08);
     --radius: 8px;
     --ease: cubic-bezier(.22, 1, .36, 1);
+    --accent-rgb: 0, 167, 181;
   }
+
+  /* ── Provider brand themes ──────────────────────────────────────────
+     The dashboard adopts the visual identity of the mailbox provider it
+     is interfacing: pick a provider (nav dial, chips, or the triage
+     select) and the accent family shifts in phase with it. Tokens only —
+     layout and semantics untouched. No attribute = Universal teal. */
+  html[data-provider="gmail"] {
+    --accent: #ea4335;
+    --accent-strong: #c5221f;
+    --accent-soft: #fce8e6;
+    --accent-rgb: 234, 67, 53;
+  }
+  html[data-provider="outlook"] {
+    --accent: #0078d4;
+    --accent-strong: #005a9e;
+    --accent-soft: #e3f0fb;
+    --accent-rgb: 0, 120, 212;
+  }
+  html[data-provider="icloud"] {
+    --accent: #3478f6;
+    --accent-strong: #1d5fd6;
+    --accent-soft: #e8f0fe;
+    --accent-rgb: 52, 120, 246;
+  }
+  html[data-provider="imap"] {
+    --accent: #0e7f62;
+    --accent-strong: #0a5f4a;
+    --accent-soft: #e5f8f2;
+    --accent-rgb: 14, 127, 98;
+  }
+
+  /* Phase-shift: applied transiently while a theme swap is in flight so
+     the whole surface cross-fades instead of snapping. Removed after the
+     swap so it cannot interfere with normal micro-interactions. */
+  html.theme-anim *,
+  html.theme-anim *::before,
+  html.theme-anim *::after {
+    transition:
+      background-color .7s var(--ease),
+      border-color .7s var(--ease),
+      color .7s var(--ease),
+      box-shadow .7s var(--ease),
+      outline-color .7s var(--ease),
+      fill .7s var(--ease),
+      stroke .7s var(--ease) !important;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html.theme-anim *,
+    html.theme-anim *::before,
+    html.theme-anim *::after { transition: none !important; }
+  }
+
+  /* Nav theme dial: one dot per mailbox identity */
+  .theme-dial {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--paper);
+  }
+  .theme-dial .dot {
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--dot, var(--accent));
+    opacity: .55;
+    transform: scale(.9);
+    transition: opacity .25s var(--ease), transform .25s var(--ease), box-shadow .25s var(--ease);
+  }
+  .theme-dial .dot:hover { opacity: .85; }
+  .theme-dial .dot.active {
+    opacity: 1;
+    transform: scale(1.12);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .22);
+  }
+  .theme-dial .dot[data-theme=""] { --dot: #00a7b5; }
+  .theme-dial .dot[data-theme="gmail"] { --dot: #ea4335; }
+  .theme-dial .dot[data-theme="outlook"] { --dot: #0078d4; }
+  .theme-dial .dot[data-theme="icloud"] { --dot: #3478f6; }
+  .theme-dial .dot[data-theme="imap"] { --dot: #0e7f62; }
 
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
     margin: 0;
     background:
-      radial-gradient(circle at 82% 8%, rgba(0, 167, 181, .11), transparent 28rem),
+      radial-gradient(circle at 82% 8%, rgba(var(--accent-rgb), .11), transparent 28rem),
       linear-gradient(180deg, #fff 0%, var(--bg) 44%, #fff 100%);
     color: var(--ink);
     font: 15px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -75,7 +160,7 @@
     border-radius: var(--radius);
   }
   .skip:focus { left: 20px; }
-  :focus-visible { outline: 3px solid rgba(0, 167, 181, .26); outline-offset: 2px; }
+  :focus-visible { outline: 3px solid rgba(var(--accent-rgb), .26); outline-offset: 2px; }
 
   nav {
     position: sticky;
@@ -301,7 +386,7 @@
     font-size: 14px;
     transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
   }
-  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(0, 167, 181, .12); outline: 0; }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), .12); outline: 0; }
   .provider-row { display: flex; flex-wrap: wrap; gap: 8px; }
   .provider {
     border: 1px solid var(--line);
@@ -312,7 +397,9 @@
     font-size: 12px;
     font-weight: 760;
   }
-  .provider.active { border-color: rgba(0, 167, 181, .42); background: var(--accent-soft); color: var(--accent-strong); }
+  .provider.active { border-color: rgba(var(--accent-rgb), .42); background: var(--accent-soft); color: var(--accent-strong); }
+  button.provider { cursor: pointer; transition: border-color .2s var(--ease), background .2s var(--ease), color .2s var(--ease); }
+  button.provider:hover { border-color: rgba(var(--accent-rgb), .42); color: var(--ink); }
   .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .mini {
     min-height: 88px;
@@ -550,7 +637,7 @@
     display: flex;
     flex-direction: column;
   }
-  .plan.feature { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(0, 167, 181, .09); }
+  .plan.feature { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), .09); }
   .plan h3 { margin: 0; font-size: 18px; }
   .plan .price { margin-top: 12px; font-size: 34px; line-height: 1; font-weight: 840; }
   .plan .blurb { margin: 0; color: var(--muted); font-size: 13px; }
@@ -720,6 +807,13 @@
       <a href="#proof">Proof</a>
       <a href="#plans">Plans</a>
       <a href="/docs">Docs</a>
+      <div class="theme-dial" role="group" aria-label="Mailbox brand theme">
+        <button type="button" class="dot active" data-theme="" title="Universal" aria-label="Universal theme"></button>
+        <button type="button" class="dot" data-theme="gmail" title="Gmail" aria-label="Gmail theme"></button>
+        <button type="button" class="dot" data-theme="outlook" title="Outlook" aria-label="Outlook theme"></button>
+        <button type="button" class="dot" data-theme="icloud" title="iCloud" aria-label="iCloud theme"></button>
+        <button type="button" class="dot" data-theme="imap" title="IMAP" aria-label="IMAP theme"></button>
+      </div>
       <a class="btn btn-primary" href="#risk-check">Run risk check</a>
     </div>
   </div>
@@ -770,11 +864,11 @@
           <details class="reveal">
             <summary>Providers</summary>
             <div class="reveal-body">
-              <div class="provider-row" aria-label="Supported providers">
-                <span class="provider active">Gmail</span>
-                <span class="provider">Outlook</span>
-                <span class="provider">iCloud</span>
-                <span class="provider">IMAP</span>
+              <div class="provider-row" role="group" aria-label="Supported providers — selecting one shifts the dashboard to that mailbox's brand theme">
+                <button type="button" class="provider active" data-theme="gmail">Gmail</button>
+                <button type="button" class="provider" data-theme="outlook">Outlook</button>
+                <button type="button" class="provider" data-theme="icloud">iCloud</button>
+                <button type="button" class="provider" data-theme="imap">IMAP</button>
               </div>
             </div>
           </details>
@@ -1041,6 +1135,48 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const API_BASE = window.__MAIL_AUTOMATION_API_BASE__ || "";
+
+/* ── Provider brand theming ─────────────────────────────────────────
+   The dashboard shifts its accent identity in phase with the mailbox
+   provider being interfaced. Sources of truth, in order: explicit user
+   pick (nav dial / provider chips), the triage provider select, then
+   the persisted last choice. Empty theme = Universal. */
+const PROVIDER_THEMES = ["gmail", "outlook", "icloud", "imap"];
+const SELECT_TO_THEME = { gmail: "gmail", outlook: "outlook", mailapp: "icloud", imap: "imap" };
+const THEME_TO_SELECT = { gmail: "gmail", outlook: "outlook", icloud: "mailapp", imap: "imap" };
+let themeAnimTimer = null;
+
+function setProviderTheme(theme, opts) {
+  const animate = !opts || opts.animate !== false;
+  const root = document.documentElement;
+  theme = PROVIDER_THEMES.includes(theme) ? theme : "";
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (animate && !reduced) {
+    root.classList.add("theme-anim");
+    clearTimeout(themeAnimTimer);
+    themeAnimTimer = setTimeout(() => root.classList.remove("theme-anim"), 800);
+  }
+  if (theme) root.setAttribute("data-provider", theme);
+  else root.removeAttribute("data-provider");
+  try { localStorage.setItem("uma-provider-theme", theme); } catch (e) { /* private mode */ }
+  document.querySelectorAll("[data-theme]").forEach((el) => {
+    el.classList.toggle("active", (el.getAttribute("data-theme") || "") === theme);
+  });
+  const sel = $("provider");
+  if (sel && theme && THEME_TO_SELECT[theme]) sel.value = THEME_TO_SELECT[theme];
+}
+
+document.querySelectorAll("[data-theme]").forEach((el) => {
+  el.addEventListener("click", () => setProviderTheme(el.getAttribute("data-theme") || ""));
+});
+$("provider").addEventListener("change", (e) => {
+  setProviderTheme(SELECT_TO_THEME[e.target.value] || "");
+});
+(() => {
+  let saved = "";
+  try { saved = localStorage.getItem("uma-provider-theme") || ""; } catch (e) { /* private mode */ }
+  setProviderTheme(saved, { animate: false });
+})();
 
 const SAMPLE_PLANS = [
   {
