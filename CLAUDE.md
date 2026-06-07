@@ -363,6 +363,29 @@ python3 cli.py summary --provider gmail --limit 100
 python3 cli.py triage --provider gmail --top 20 --draft --name "Anthony"
 ```
 
+## Web Dashboard
+
+`web/index.html` is a single-file static dashboard (deployed at uma.4444j99.dev) with
+sender-check and triage-preview panels backed by the `/v1/senders/check` and
+`/v1/triage/preview` API endpoints.
+
+**Provider brand theming:** the dashboard shifts in phase with the interfaced mailbox.
+`html[data-provider="gmail|outlook|icloud|imap"]` swaps the `--accent`/`--accent-rgb`
+CSS token family to the provider's brand palette, with a 700ms cross-fade
+(`prefers-reduced-motion` respected). Three control surfaces stay in sync: the nav
+theme dial, the provider chips, and the `#provider` triage select (CLI key `mailapp`
+maps to visual identity `icloud`). Choice persists via localStorage
+(`uma-provider-theme`).
+
+```bash
+# Visual proof: brand accents, dial↔select sync, reload persistence
+npx playwright install chromium   # once
+node tests/theme_proof.mjs [output-dir]
+
+# Static assertions on the dashboard markup
+python3 -m pytest tests/test_web.py -q
+```
+
 <!-- ORGANVM:AUTO:START -->
 ## System Context (auto-generated — do not edit)
 
