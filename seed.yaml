@@ -10,8 +10,12 @@ metadata:
   implementation_status: ACTIVE
   tier: standard
   promotion_status: PUBLIC_PROCESS
-  last_validated: '2026-03-08'
+  last_validated: '2026-06-07'
 produces:
 - type: artifact
   description: Email workflow automation and scheduling
+- type: artifact
+  description: Mailbox triage pipeline — per-item research, priority scoring, voice-matched reply drafts (CLI `triage`)
+- type: artifact
+  description: Web dashboard (web/index.html) with per-provider brand theming phased to the interfaced mailbox
 consumes: []
