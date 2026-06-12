@@ -79,7 +79,7 @@ Universal Mail Automation is a Python-based email triage system that applies a u
 
 3. **Time-Based Escalation** — Emails that remain unprocessed age into higher priority tiers. A Tier 4 (Reference) email that sits for 72+ hours automatically escalates to Tier 1 (Critical), ensuring nothing falls through the cracks.
 
-The system is designed as a daily automation. A macOS `launchd` job runs every morning at 9:00 AM, processing all three providers sequentially, with crash recovery ensuring interrupted runs can resume from the last successfully processed page.
+The system is designed for daily intake, but the primary local path is on-demand. Use `scripts/intake_now.sh` to create/reuse the venv, verify Gmail auth, and write private triage reports under user-local state. A macOS `launchd` job is available only as an explicit opt-in for machines where LaunchAgents are allowed.
 
 ---
 
@@ -151,7 +151,8 @@ universal-mail--automation/
 ├── auth/                           # Authentication helpers
 │   ├── __init__.py
 │   └── onepassword.py              # 1Password CLI integration for secrets
-├── deploy.sh                       # macOS deployment script (venv + launchd)
+├── deploy.sh                       # macOS setup script (venv; launchd opt-in only)
+├── scripts/intake_now.sh           # On-demand Gmail intake runner
 ├── run_automation.sh               # Daily runner script (all providers)
 ├── seed.yaml                       # Project metadata and AI agent contract
 ├── requirements.txt                # Python dependencies
@@ -245,7 +246,32 @@ The `core/models.py` module defines three provider-agnostic dataclasses:
 - Outlook Azure app registration (for Outlook.com provider)
 - 1Password CLI (`op`) for secrets management (recommended)
 
-### Automated Deployment
+### Local On-Demand Intake
+
+This machine's home-level agent policy forbids LaunchAgents. The safe default is
+the on-demand intake runner:
+
+```bash
+cd ~/Code/organvm/universal-mail--automation
+scripts/intake_now.sh
+```
+
+The runner:
+
+1. Creates `.venv/` if it is missing
+2. Installs the core, API, and MCP dependency sets
+3. Loads `~/.config/op/mail_automation.env.op.sh`
+4. Runs `cli.py health --provider gmail`
+5. Writes private reports under `~/.local/state/universal-mail-automation/intake/`
+6. Does **not** install, load, or modify LaunchAgents
+
+The most useful output files are:
+
+- `*-reply-needed.md` — recent human/action-oriented mail and suggested replies
+- `*-drafts.md` — stuck drafts from the last 30 days
+- `*-gmail-risk.md` — broader two-week risk/payment/security/provider queue
+
+### Automated Setup
 
 The `deploy.sh` script handles the complete setup:
 
@@ -260,7 +286,13 @@ This will:
 2. Install all dependencies from `requirements.txt` (plus `msal` and `requests` for Outlook)
 3. Make `run_automation.sh` executable
 4. Create the log directory at `~/System/Logs/mail_automation/`
-5. Install the macOS LaunchAgent for daily 9:00 AM scheduling
+5. Skip LaunchAgent installation unless explicitly requested
+
+To opt into launchd on a machine where that is allowed:
+
+```bash
+INSTALL_LAUNCH_AGENT=1 ./deploy.sh
+```
 
 ### Manual Setup
 
@@ -348,6 +380,9 @@ python3 cli.py triage --provider gmail --top 20
 
 # Triage with voice-matched reply drafts for items needing a response
 python3 cli.py triage --provider gmail --top 20 --draft --name "Anthony"
+
+# On-demand recent intake reports for this local machine
+scripts/intake_now.sh
 
 # Use a saved voice profile / sent-mail corpus for drafting
 python3 cli.py triage --provider gmail --draft \
@@ -554,7 +589,9 @@ The 28 built-in categories span the full spectrum of email types:
 
 ## Scheduling and Daily Automation
 
-The system includes a macOS `LaunchAgent` plist (`com.user.mail_automation.plist`) that schedules `run_automation.sh` to execute daily at 9:00 AM. The daily runner processes providers in sequence:
+The system includes a macOS `LaunchAgent` plist (`com.user.mail_automation.plist`) that can schedule `run_automation.sh` to execute daily at 9:00 AM, but scheduler installation is opt-in. The default local workflow is `scripts/intake_now.sh`, which runs on demand and writes private reports under `~/.local/state/universal-mail-automation/intake/`.
+
+The daily runner processes providers in sequence:
 
 1. **Gmail** — Labels unlabeled emails, then sweeps `Misc/Other` for re-categorization.
 2. **Outlook** — Processes the full inbox with tier routing.
@@ -562,11 +599,14 @@ The system includes a macOS `LaunchAgent` plist (`com.user.mail_automation.plist
 
 Each step runs independently (failure in one provider does not block the others), with logs written to `~/System/Logs/mail_automation/`.
 
-The `deploy.sh` script manages the full lifecycle:
+The `deploy.sh` script manages setup and optional scheduler install:
 
 ```bash
-# Install and schedule
-./deploy.sh
+# Install and opt into scheduling
+INSTALL_LAUNCH_AGENT=1 ./deploy.sh
+
+# Preferred local on-demand intake
+scripts/intake_now.sh
 
 # Check scheduler status
 launchctl list | grep mail_automation

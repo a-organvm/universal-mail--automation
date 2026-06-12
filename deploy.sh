@@ -9,6 +9,7 @@ VENV_DIR="${VENV_DIR:-$REPO_DIR/.venv}"
 PLIST_SRC="$REPO_DIR/com.user.mail_automation.plist"
 PLIST_DEST="$HOME/Library/LaunchAgents/com.user.mail_automation.plist"
 LOG_DIR="$HOME/System/Logs/mail_automation"
+INSTALL_LAUNCH_AGENT="${INSTALL_LAUNCH_AGENT:-0}"
 
 echo "Deploying Universal Mail Automation from $REPO_DIR"
 echo "Using Python: $PYTHON_BIN"
@@ -42,8 +43,10 @@ if [ ! -f "$HOME/.config/op/mail_automation.env.op.sh" ]; then
   echo "WARNING: Env file not found at ~/.config/op/mail_automation.env.op.sh" >&2
 fi
 
-# Install and load the launchd job.
-if [ -f "$PLIST_SRC" ]; then
+# Install and load the launchd job only when explicitly requested. The primary
+# local path is on-demand because this machine's global agent policy forbids
+# LaunchAgents after repeated freeze incidents.
+if [ "$INSTALL_LAUNCH_AGENT" = "1" ] && [ -f "$PLIST_SRC" ]; then
   mkdir -p "$(dirname "$PLIST_DEST")"
   cp "$PLIST_SRC" "$PLIST_DEST"
 
@@ -61,14 +64,18 @@ if [ -f "$PLIST_SRC" ]; then
 
   echo "LaunchAgent installed: $PLIST_DEST"
   echo "Scheduled to run daily at 9:00 AM"
-else
+elif [ "$INSTALL_LAUNCH_AGENT" = "1" ]; then
   echo "Launchd plist not found at $PLIST_SRC; skipping scheduler setup." >&2
+else
+  echo "LaunchAgent install skipped. Use scripts/intake_now.sh for on-demand intake."
+  echo "To opt into launchd on a machine where it is allowed: INSTALL_LAUNCH_AGENT=1 ./deploy.sh"
 fi
 
 echo ""
 echo "Deployment complete!"
 echo ""
 echo "Commands:"
+echo "  Intake now:  $REPO_DIR/scripts/intake_now.sh"
 echo "  Run now:     $REPO_DIR/run_automation.sh"
 echo "  Check logs:  tail -f $LOG_DIR/launchd.stdout.log"
 echo "  Status:      launchctl list | grep mail_automation"
