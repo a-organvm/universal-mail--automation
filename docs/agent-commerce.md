@@ -7,13 +7,34 @@ either.
 ## MCP — Model Context Protocol (how agents *use* the tool)
 
 Anthropic's tool-connectivity standard. Our MCP server (`mcp_server/`) exposes the
-triage engine as three tools an AI agent can call:
+triage engine and redacted operator intelligence as tools an AI agent can call:
 
 | Tool | Effect | Annotation |
 |------|--------|------------|
 | `check_protected_sender` | pure check, no mailbox | `readOnlyHint` |
 | `triage_preview` | dry-run, touches nothing | `readOnlyHint` |
 | `triage` | applies labels/archive; `dry_run=True` by default | `destructiveHint` |
+| `mail_history_export` | normalizes local JSON/JSONL/mbox/EML/EMLX sources into a private export file and returns only a safe receipt | non-destructive file write |
+| `mail_intelligence` | mines a local historical export into redacted opportunities, risks, evidence, and `/ops` reconciliation | `readOnlyHint` |
+| `mail_action_plan` | groups redacted intelligence into ranked, approval-aware next actions | `readOnlyHint` |
+| `mail_resolver_plan` | maps action groups to official surfaces, blockers, safe prep, and required proof | `readOnlyHint` |
+| `mail_provider_surface_plan` | ranks controlled provider hints into the next official API/CLI/manual resolver frontier | `readOnlyHint` |
+| `mail_resolver_ledger` | reads redacted official-surface resolver proof state | `readOnlyHint` |
+| `mail_github_resolver` | reads a bounded redacted GitHub CLI/API snapshot for GitHub resolver actions | `readOnlyHint` |
+| `mail_github_resolver_receipts` | records GitHub provider-read or blocker snapshot candidates into the local resolver ledger | non-destructive file write |
+| `mail_followup_resolver` | reads redacted mail/LinkedIn follow-up state from local approval and delivery receipts | `readOnlyHint` |
+| `mail_followup_resolver_receipts` | records follow-up resolver proof from existing approval or delivery receipts | non-destructive file write |
+| `mail_external_resolver` | reads provider/security/billing/subscription/legal planned external-surface state | `readOnlyHint` |
+| `mail_external_resolver_receipts` | records explicit local blocker attestations for external-surface lanes | non-destructive file write |
+| `mail_resolver_receipt` | appends a redacted resolver receipt; no portal automation | non-destructive file write |
+| `mail_action_ledger` | reads redacted local action status and proof receipts | `readOnlyHint` |
+| `mail_action_receipt` | appends a redacted local action receipt; no mailbox mutation | non-destructive file write |
+| `mail_draft_package` | builds private draft candidates for approval; requires `ack_private=True` | `readOnlyHint` |
+| `mail_draft_approvals` | reads redacted local draft approval status | `readOnlyHint` |
+| `mail_draft_approval` | appends a redacted local draft approval receipt; no send | non-destructive file write |
+| `mail_delivery_ledger` | reads redacted post-approval delivery intent/status | `readOnlyHint` |
+| `mail_delivery_receipt` | appends a redacted local delivery receipt; no provider draft or send | non-destructive file write |
+| `mail_evidence_review` | opens one bounded private source message for an evidence id; requires `ack_private=True` | `readOnlyHint` |
 
 Every tool delegates to `api.service`, so the fail-closed protected-sender gate and
 the independent audit receipt apply to agent calls too: **an agent physically
@@ -24,6 +45,94 @@ decision-layer restraint.
 Live MCP triage (`triage(dry_run=False)`) also requires `account_api_key`. It uses
 the same account entitlement reservation as the HTTP API: monthly run allowance
 first, prepaid run credits second, and rollback on provider or gate failure.
+
+`mail_intelligence` is read-only and local-file based. It does not send, label,
+archive, mark read, or mutate a mailbox; it returns `uma.mail.intelligence.v1`
+from a historical export path and optional current ops report path.
+
+`mail_history_export` is the private intake producer for that tool. It reads local
+mail sources and writes `uma.mail.history_export.v1`; because that file can
+contain raw subjects, snippets, and bounded bodies, the MCP tool returns only
+`uma.mail.history_export.receipt.v1`.
+
+`mail_action_plan` consumes the redacted intelligence cache and returns
+`uma.mail.action_plan.v1`. It can tell an agent what should happen next, but it
+does not grant send, archive, mark-read, or portal-action authority.
+
+`mail_resolver_plan` consumes the same redacted intelligence cache and returns
+`uma.mail.resolver_plan.v1`. It tells an agent which official surface is
+required for each action group, including mail or LinkedIn inboxes, GitHub
+API/CLI/web, provider security dashboards, billing portals, subscription
+portals, or legal review. It is plan-only: no sends, provider drafts, portal
+mutations, archive changes, labels, or mark-read operations.
+
+`mail_resolver_ledger` and `mail_resolver_receipt` are the official-surface
+proof-state layer. They read/write `uma.mail.resolver_ledger.v1` and
+`uma.mail.resolver_receipt.v1` records for checks such as GitHub reconciliation,
+security review, billing verification, subscription decisions, and legal review.
+The receipts hash external references and remain operator attestations until a
+future provider-backed resolver writes stronger proof.
+
+`mail_github_resolver` is the first provider-specific official-surface reader.
+It consumes the same redacted intelligence cache, builds the current resolver
+plan, and uses the GitHub CLI for bounded read-only checks of notifications,
+assigned issues, and open PR search when authenticated. It hashes repository
+references, omits raw titles, URLs, subjects, command output, and login data,
+and returns receipt candidates only. It never mutates GitHub, portals, mailboxes,
+drafts, labels, or sends.
+
+`mail_github_resolver_receipts` records those provider-read or blocker
+candidates into the same redacted resolver ledger as
+`mail_resolver_receipt`. It may read GitHub through the CLI/API, then writes
+local proof only. `provider_backed_read` can be true for successful official
+reads; `provider_backed_automation`, sends, portal mutations, and mailbox
+mutations remain false.
+
+`mail_followup_resolver` and `mail_followup_resolver_receipts` are the
+mail/LinkedIn follow-up proof bridge. They reconcile `reply_follow_up` actions
+against local draft approval and delivery receipts, then record resolver proof
+only when those receipts already exist. They do not read LinkedIn, create
+provider drafts, send, archive, label, mark read, or mutate a mailbox.
+
+`mail_external_resolver` and `mail_external_resolver_receipts` cover the
+provider/security/billing/subscription/legal lanes that still require official
+surfaces. The snapshot is planned-only by default and may include controlled
+provider/surface hint slugs for routing. Receipt writes require an explicit
+blocker attestation and remain local proof state. Provider hints are not
+provider reads. They do not read providers, open portals, mutate accounts, send,
+archive, label, or mark read.
+
+`mail_provider_surface_plan` is the provider resolver frontier. It ranks those
+controlled provider/surface hint slugs into future official API/CLI/manual
+resolver candidates, showing existing UMA coverage, proof goals, blockers, and
+future intake detector candidates. It is read-only and plan-only: no provider
+reads, portal automation, sends, or mailbox mutations.
+
+`mail_action_ledger` and `mail_action_receipt` are the local proof layer.
+`mail_action_ledger` returns `uma.mail.action_ledger.v1`, and
+`mail_action_receipt` appends `uma.mail.action_receipt.v1` to a JSONL receipt
+ledger. These tools record redacted status only; they do not send, archive,
+label, mark read, or change provider state.
+
+`mail_draft_package` is the gated private draft tool. It returns
+`uma.mail.draft_package.v1` for `missed_lead` / `draft_approval` actions, with
+private recipients, source-backed fact checks, and draft text. It requires
+`ack_private=True`; every candidate remains `send_allowed=false`.
+
+`mail_draft_approvals` and `mail_draft_approval` are the local approval layer.
+They read/write redacted draft approval receipts. Approval does not send mail and
+does not create provider drafts.
+
+`mail_delivery_ledger` and `mail_delivery_receipt` are the post-approval local
+delivery layer. They can record that a provider draft was requested, blocked, or
+operator-attested externally, but they do not create provider drafts or send
+mail. `provider_draft_recorded` and `sent_recorded` remain local attestations
+until a provider-specific resolver writes official proof.
+
+`mail_evidence_review` is the gated private review tool. It can return raw
+sender, address, subject, snippet, and bounded body text for one evidence id, so
+agents must pass `ack_private=True`. The tool remains read-only and grants no
+send or mailbox-mutation authority.
 
 - **stdio** (local, Claude Desktop, any MCP client): `python -m mcp_server`
 - **Streamable HTTP** (hosted): mounted at `/mcp` on the main app; also runnable

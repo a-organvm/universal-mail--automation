@@ -1,0 +1,1421 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UMA Operator Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f2;
+      --ink: #171717;
+      --muted: #62625c;
+      --line: #d9d7cf;
+      --panel: #ffffff;
+      --accent: #0f766e;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --ok: #166534;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .wrap {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .sub {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    input, select {
+      height: 36px;
+      min-width: 240px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 10px;
+      font: inherit;
+      background: #fff;
+    }
+
+    button {
+      height: 36px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 0 12px;
+      color: #fff;
+      background: var(--accent);
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    main {
+      padding: 22px 0 36px;
+    }
+
+    .status {
+      min-height: 42px;
+      margin-bottom: 16px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .status.bad { border-color: #fecaca; color: var(--danger); }
+    .status.good { border-color: #bbf7d0; color: var(--ok); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .metric, .panel, .lane, .bucket, .action {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .metric {
+      padding: 14px;
+      min-height: 92px;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .value {
+      margin-top: 8px;
+      font-size: 30px;
+      line-height: 1;
+      font-weight: 760;
+    }
+
+    .hint {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .panel {
+      padding: 14px;
+      margin-bottom: 16px;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    .lane, .bucket, .action {
+      padding: 12px;
+      margin-top: 10px;
+    }
+
+    .priority {
+      min-width: 42px;
+      text-align: center;
+      border-radius: 6px;
+      padding: 4px 8px;
+      color: #fff;
+      background: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+
+    .priority.p0 { background: var(--danger); }
+    .priority.p1 { background: var(--warn); }
+    .priority.p2 { background: var(--accent); }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: baseline;
+    }
+
+    .title {
+      font-weight: 720;
+    }
+
+    .count {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .tag {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 7px;
+      font-size: 12px;
+      color: var(--muted);
+      background: #fafaf7;
+    }
+
+    .sample {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .private-review {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .private-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .private-controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .private-controls input[type="checkbox"] {
+      min-width: 0;
+      width: 16px;
+      height: 16px;
+      padding: 0;
+    }
+
+    .private-message {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      background: #fff7f7;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+    }
+
+    .empty {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .snapshot-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .snapshot-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 72px;
+      background: #fafaf7;
+    }
+
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .columns { grid-template-columns: 1fr; }
+      .snapshot-grid { grid-template-columns: 1fr 1fr; }
+      .topbar { align-items: flex-start; flex-direction: column; padding: 14px 0; }
+      .controls { justify-content: flex-start; }
+      input, select { min-width: min(100%, 280px); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap topbar">
+      <div>
+        <h1>UMA Operator Dashboard</h1>
+        <div class="sub" id="sourceMeta">Redacted local mail-triage summary</div>
+      </div>
+      <div class="controls">
+        <input id="token" type="password" autocomplete="off" placeholder="Bearer token, if configured" />
+        <button id="refresh">Refresh</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="status" class="status">Loading operator summary...</div>
+    <section id="metrics" class="grid"></section>
+    <section class="panel">
+      <h2>Snapshot</h2>
+      <div id="snapshot"></div>
+      <div id="history"></div>
+    </section>
+    <section class="panel">
+      <h2>Historical Intelligence</h2>
+      <div id="intelligence"></div>
+    </section>
+    <section class="panel">
+      <h2>Action Plan</h2>
+      <div id="actionPlan"></div>
+    </section>
+    <section class="panel">
+      <h2>Resolver Plan</h2>
+      <div class="private-controls">
+        <button id="loadResolverPlan" type="button">Refresh Resolver Plan</button>
+        <button id="loadProviderSurfacePlan" type="button">Provider Surface Plan</button>
+        <button id="loadGitHubResolver" type="button">GitHub Resolver</button>
+        <button id="recordGitHubResolverReceipts" type="button">Record GitHub Proof</button>
+        <button id="loadFollowupResolver" type="button">Follow-up Resolver</button>
+        <button id="recordFollowupResolverReceipts" type="button">Record Follow-up Proof</button>
+        <button id="loadExternalResolver" type="button">External Resolver</button>
+        <button id="recordExternalResolverReceipts" type="button">Record External Blockers</button>
+      </div>
+      <div id="resolverPlan"></div>
+      <div id="providerSurfacePlan"></div>
+      <div id="githubResolver"></div>
+      <div id="followupResolver"></div>
+      <div id="externalResolver"></div>
+      <div class="private-review">
+        <div class="private-controls">
+          <input id="resolverActionId" type="text" autocomplete="off" placeholder="Action id, e.g. action_..." />
+          <select id="resolverStatus">
+            <option value="verified_waiting">verified_waiting</option>
+            <option value="verified_blocked">verified_blocked</option>
+            <option value="verified_resolved">verified_resolved</option>
+            <option value="needs_follow_up">needs_follow_up</option>
+            <option value="not_found">not_found</option>
+            <option value="not_applicable">not_applicable</option>
+          </select>
+          <select id="resolverReason">
+            <option value="official_surface_checked">official_surface_checked</option>
+            <option value="github_reconciled">github_reconciled</option>
+            <option value="security_reviewed">security_reviewed</option>
+            <option value="billing_verified">billing_verified</option>
+            <option value="legal_review_complete">legal_review_complete</option>
+            <option value="subscription_decision_recorded">subscription_decision_recorded</option>
+            <option value="external_state_matches_mail">external_state_matches_mail</option>
+            <option value="external_state_differs">external_state_differs</option>
+            <option value="awaiting_provider">awaiting_provider</option>
+            <option value="awaiting_reply">awaiting_reply</option>
+            <option value="blocked_no_auth">blocked_no_auth</option>
+            <option value="blocked_provider_unavailable">blocked_provider_unavailable</option>
+            <option value="duplicate">duplicate</option>
+            <option value="not_actionable">not_actionable</option>
+          </select>
+          <select id="resolverProofType">
+            <option value="official_provider_verification">official_provider_verification</option>
+            <option value="github_issue_pr_billing_or_security_state">github_issue_pr_billing_or_security_state</option>
+            <option value="official_provider_status">official_provider_status</option>
+            <option value="official_payment_or_invoice_verification">official_payment_or_invoice_verification</option>
+            <option value="official_subscription_status">official_subscription_status</option>
+            <option value="legal_review_receipt">legal_review_receipt</option>
+            <option value="operator_decision">operator_decision</option>
+            <option value="action_receipt">action_receipt</option>
+            <option value="draft_approval_receipt">draft_approval_receipt</option>
+            <option value="delivery_receipt">delivery_receipt</option>
+            <option value="future_provider_send_receipt">future_provider_send_receipt</option>
+            <option value="future_send_receipt_if_reply_needed">future_send_receipt_if_reply_needed</option>
+            <option value="manual_review_receipt">manual_review_receipt</option>
+          </select>
+          <input id="resolverProvider" type="text" autocomplete="off" placeholder="Provider, e.g. github" />
+          <input id="resolverExternalRef" type="text" autocomplete="off" placeholder="Optional external ref, stored hashed" />
+          <button id="recordResolverReceipt" type="button">Record Resolver</button>
+          <button id="loadResolverLedger" type="button">Resolver Ledger</button>
+        </div>
+        <div id="resolverLedger"></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Action Ledger</h2>
+      <div id="actionLedger"></div>
+      <div class="private-review">
+        <div class="private-controls">
+          <input id="receiptActionId" type="text" autocomplete="off" placeholder="Action id, e.g. action_..." />
+          <select id="receiptStatus">
+            <option value="waiting">waiting</option>
+            <option value="reviewing">reviewing</option>
+            <option value="blocked">blocked</option>
+            <option value="resolved">resolved</option>
+            <option value="ignored">ignored</option>
+            <option value="open">open</option>
+          </select>
+          <select id="receiptReason">
+            <option value="awaiting_reply">awaiting_reply</option>
+            <option value="evidence_reviewed">evidence_reviewed</option>
+            <option value="draft_prepared">draft_prepared</option>
+            <option value="portal_verified">portal_verified</option>
+            <option value="legal_waiting">legal_waiting</option>
+            <option value="provider_blocked">provider_blocked</option>
+            <option value="needs_human">needs_human</option>
+            <option value="not_actionable">not_actionable</option>
+            <option value="duplicate">duplicate</option>
+            <option value="reopened">reopened</option>
+          </select>
+          <button id="recordReceipt" type="button">Record</button>
+        </div>
+        <div id="ledgerReceipt"></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Private Evidence Review</h2>
+      <div class="private-review">
+        <div class="private-controls">
+          <input id="evidenceId" type="text" autocomplete="off" placeholder="Evidence id, e.g. ev_..." />
+          <label><input id="ackPrivate" type="checkbox" /> private</label>
+          <button id="reviewEvidence" type="button">Open</button>
+        </div>
+        <div id="evidenceReview"></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Private Draft Package</h2>
+      <div class="private-review">
+        <div class="private-controls">
+          <input id="draftActionId" type="text" autocomplete="off" placeholder="Action id, e.g. action_..." />
+          <label><input id="ackDraftPrivate" type="checkbox" /> private</label>
+          <button id="buildDraftPackage" type="button">Build</button>
+        </div>
+        <div id="draftPackage"></div>
+        <div class="private-controls" style="margin-top: 10px;">
+          <input id="draftApprovalId" type="text" autocomplete="off" placeholder="Draft id, e.g. draft_..." />
+          <select id="draftDecision">
+            <option value="approved">approved</option>
+            <option value="revise">revise</option>
+            <option value="rejected">rejected</option>
+          </select>
+          <select id="draftReason">
+            <option value="ready_to_send">ready_to_send</option>
+            <option value="needs_edit">needs_edit</option>
+            <option value="fact_issue">fact_issue</option>
+            <option value="wrong_recipient">wrong_recipient</option>
+            <option value="stale_context">stale_context</option>
+            <option value="legal_review">legal_review</option>
+            <option value="duplicate">duplicate</option>
+            <option value="not_actionable">not_actionable</option>
+          </select>
+          <button id="recordDraftApproval" type="button">Approve</button>
+          <button id="loadDraftApprovals" type="button">Status</button>
+        </div>
+        <div id="draftApproval"></div>
+        <div class="private-controls" style="margin-top: 10px;">
+          <select id="deliveryStatus">
+            <option value="provider_draft_requested">provider_draft_requested</option>
+            <option value="provider_draft_recorded">provider_draft_recorded</option>
+            <option value="send_requested">send_requested</option>
+            <option value="sent_recorded">sent_recorded</option>
+            <option value="blocked">blocked</option>
+            <option value="canceled">canceled</option>
+          </select>
+          <select id="deliveryReason">
+            <option value="approved_for_provider_draft">approved_for_provider_draft</option>
+            <option value="operator_confirmed_external_draft">operator_confirmed_external_draft</option>
+            <option value="operator_confirmed_external_send">operator_confirmed_external_send</option>
+            <option value="final_review_required">final_review_required</option>
+            <option value="provider_unavailable">provider_unavailable</option>
+            <option value="portal_required">portal_required</option>
+            <option value="not_current">not_current</option>
+            <option value="duplicate">duplicate</option>
+            <option value="policy_blocked">policy_blocked</option>
+          </select>
+          <input id="deliveryProvider" type="text" autocomplete="off" placeholder="Provider, e.g. gmail" />
+          <input id="deliveryExternalRef" type="text" autocomplete="off" placeholder="Optional external ref, stored hashed" />
+          <button id="recordDeliveryReceipt" type="button">Record Delivery</button>
+          <button id="loadDeliveryLedger" type="button">Delivery</button>
+        </div>
+        <div id="deliveryLedger"></div>
+      </div>
+    </section>
+    <section class="columns">
+      <div class="panel">
+        <h2>Action Lanes</h2>
+        <div id="lanes"></div>
+      </div>
+      <div class="panel">
+        <h2>Buckets</h2>
+        <div id="buckets"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const metricsEl = document.getElementById("metrics");
+    const snapshotEl = document.getElementById("snapshot");
+    const historyEl = document.getElementById("history");
+    const intelligenceEl = document.getElementById("intelligence");
+    const actionPlanEl = document.getElementById("actionPlan");
+    const resolverPlanEl = document.getElementById("resolverPlan");
+    const providerSurfacePlanEl = document.getElementById("providerSurfacePlan");
+    const githubResolverEl = document.getElementById("githubResolver");
+    const followupResolverEl = document.getElementById("followupResolver");
+    const externalResolverEl = document.getElementById("externalResolver");
+    const resolverActionIdEl = document.getElementById("resolverActionId");
+    const resolverStatusEl = document.getElementById("resolverStatus");
+    const resolverReasonEl = document.getElementById("resolverReason");
+    const resolverProofTypeEl = document.getElementById("resolverProofType");
+    const resolverProviderEl = document.getElementById("resolverProvider");
+    const resolverExternalRefEl = document.getElementById("resolverExternalRef");
+    const resolverLedgerEl = document.getElementById("resolverLedger");
+    const actionLedgerEl = document.getElementById("actionLedger");
+    const receiptActionIdEl = document.getElementById("receiptActionId");
+    const receiptStatusEl = document.getElementById("receiptStatus");
+    const receiptReasonEl = document.getElementById("receiptReason");
+    const ledgerReceiptEl = document.getElementById("ledgerReceipt");
+    const evidenceIdEl = document.getElementById("evidenceId");
+    const ackPrivateEl = document.getElementById("ackPrivate");
+    const evidenceReviewEl = document.getElementById("evidenceReview");
+    const draftActionIdEl = document.getElementById("draftActionId");
+    const ackDraftPrivateEl = document.getElementById("ackDraftPrivate");
+    const draftPackageEl = document.getElementById("draftPackage");
+    const draftApprovalIdEl = document.getElementById("draftApprovalId");
+    const draftDecisionEl = document.getElementById("draftDecision");
+    const draftReasonEl = document.getElementById("draftReason");
+    const draftApprovalEl = document.getElementById("draftApproval");
+    const deliveryStatusEl = document.getElementById("deliveryStatus");
+    const deliveryReasonEl = document.getElementById("deliveryReason");
+    const deliveryProviderEl = document.getElementById("deliveryProvider");
+    const deliveryExternalRefEl = document.getElementById("deliveryExternalRef");
+    const deliveryLedgerEl = document.getElementById("deliveryLedger");
+    const lanesEl = document.getElementById("lanes");
+    const bucketsEl = document.getElementById("buckets");
+    const sourceMetaEl = document.getElementById("sourceMeta");
+    const tokenEl = document.getElementById("token");
+
+    const metricDefs = [
+      ["escaped_unread", "Escaped Unread", "Unread inbox outside intentional labels"],
+      ["inbox_unread", "Inbox Unread", "Current inbox pressure"],
+      ["active_unread", "Active Unread", "Action, verify, decision lanes"],
+      ["waiting_messages", "Waiting", "Sent or blocked by others"],
+      ["closed_messages", "Closed", "Reviewed or superseded"],
+      ["scoped_messages", "All Scoped", "Non-deleted report coverage"]
+    ];
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    function setStatus(text, kind = "") {
+      statusEl.className = `status ${kind}`.trim();
+      statusEl.textContent = text;
+    }
+
+    function metricCard(label, value, hint) {
+      return `<article class="metric">
+        <div class="label">${escapeHtml(label)}</div>
+        <div class="value">${escapeHtml(value ?? "n/a")}</div>
+        <div class="hint">${escapeHtml(hint)}</div>
+      </article>`;
+    }
+
+    function snapshotCard(label, value, hint) {
+      return `<div class="snapshot-item">
+        <div class="label">${escapeHtml(label)}</div>
+        <div class="value" style="font-size: 22px;">${escapeHtml(value ?? "n/a")}</div>
+        <div class="hint">${escapeHtml(hint)}</div>
+      </div>`;
+    }
+
+    function renderSnapshot(summary) {
+      const freshness = summary.freshness || {};
+      const source = summary.source || {};
+      snapshotEl.innerHTML = `<div class="snapshot-grid">
+        ${snapshotCard("Freshness", freshness.status || "unknown", freshness.reason || "")}
+        ${snapshotCard("Age Hours", freshness.age_hours, `Max ${freshness.max_age_hours ?? "?"}`)}
+        ${snapshotCard("Generated", source.generated_at || "unknown", source.filename || "report")}
+        ${snapshotCard("Checked", freshness.checked_at || "unknown", freshness.is_stale ? "Stale" : "Current")}
+      </div>`;
+    }
+
+    function renderHistory(history) {
+      const entries = (history.entries || []).slice(0, 5);
+      if (!entries.length) {
+        historyEl.innerHTML = `<div class="sample">No redacted history snapshots have been recorded yet.</div>`;
+        return;
+      }
+      historyEl.innerHTML = entries.map(entry =>
+        `<div class="sample">${escapeHtml(entry.checked_at || "unknown")} | escaped ${escapeHtml(entry.escaped_unread ?? "n/a")} | active ${escapeHtml(entry.active_unread ?? "n/a")} | ${escapeHtml(entry.is_stale ? "stale" : "fresh")}</div>`
+      ).join("");
+    }
+
+    function renderIntelligence(intel) {
+      const kpis = intel.kpis || {};
+      const answers = intel.answers || {};
+      const blocked = answers.what_is_blocked || {};
+      const next = (answers.what_should_happen_next || []).slice(0, 5);
+      const cards = [
+        snapshotCard("Missed Leads", kpis.opportunities, "Historical candidates"),
+        snapshotCard("Risks", kpis.risks, "Obligations and account risk"),
+        snapshotCard("Not In Ops", kpis.not_represented_in_current_ops, "Quiet work to surface"),
+        snapshotCard("Proof", kpis.evidence_items, "Redacted evidence ids")
+      ].join("");
+      const rows = next.map(item =>
+        `<div class="sample">${escapeHtml(item.kind)} | ${escapeHtml(item.recommended_lane)} | ${escapeHtml(item.next_action)}</div>`
+      ).join("");
+      intelligenceEl.innerHTML = `<div class="snapshot-grid">${cards}</div>
+        <div class="sample">Blocked: ${escapeHtml(blocked.needs_portal_or_human_verification ?? 0)} need portal or human verification.</div>
+        ${rows || `<div class="sample">No historical intelligence actions available.</div>`}`;
+    }
+
+    function renderActionPlan(plan) {
+      const kpis = plan.kpis || {};
+      const items = (plan.items || []).slice(0, 8);
+      const cards = [
+        snapshotCard("P0 Groups", kpis.p0, "Highest priority clusters"),
+        snapshotCard("P1 Groups", kpis.p1, "Next priority clusters"),
+        snapshotCard("Approval", kpis.approval_required, "Findings requiring approval"),
+        snapshotCard("Not In Ops", kpis.not_represented_in_current_ops, "Promote into lanes")
+      ].join("");
+      const rows = items.map(item => `
+        <article class="action">
+          <div class="row">
+            <span class="priority ${escapeHtml(item.priority || "")}">${escapeHtml(item.priority || "p?")}</span>
+            <div>
+              <div class="title">${escapeHtml(item.lane_title || item.recommended_lane)} | ${escapeHtml(item.kind)}</div>
+              <div class="hint">${escapeHtml(item.id || "")}</div>
+              <div class="hint">${escapeHtml(item.finding_count)} findings | ${escapeHtml(item.approval_type)} | ${escapeHtml(item.automation_boundary)}</div>
+            </div>
+          </div>
+          <div class="sample">${escapeHtml(item.next_action)}</div>
+        </article>
+      `).join("");
+      actionPlanEl.innerHTML = `<div class="snapshot-grid">${cards}</div>
+        ${rows || `<div class="sample">No action plan groups available.</div>`}`;
+    }
+
+    function renderResolverPlan(plan) {
+      const kpis = plan.kpis || {};
+      const items = (plan.items || []).slice(0, 8);
+      const cards = [
+        snapshotCard("Official Surface", kpis.official_surface_required, "Findings needing provider or human verification"),
+        snapshotCard("Local Prep", kpis.can_prepare_locally, "Safe review, draft, or receipt prep"),
+        snapshotCard("GitHub", kpis.github_reconcile, "Issues, PRs, billing, or security"),
+        snapshotCard("Mail/LinkedIn", kpis.mail_or_linkedin_follow_up, "Reply follow-up candidates")
+      ].join("");
+      const rows = items.map(item => `
+        <article class="action">
+          <div class="row">
+            <span class="priority ${escapeHtml(item.priority || "")}">${escapeHtml(item.priority || "p?")}</span>
+            <div>
+              <div class="title">${escapeHtml(item.resolver_type || "resolver")} | ${escapeHtml(item.official_surface_label || item.official_surface)}</div>
+              <div class="hint">${escapeHtml(item.action_id || "")}</div>
+              <div class="hint">${escapeHtml(item.finding_count)} findings | ${escapeHtml(item.current_blocker)} | send allowed ${escapeHtml(item.send_allowed)}</div>
+            </div>
+          </div>
+          <div class="sample">${escapeHtml(item.next_step)}</div>
+        </article>
+      `).join("");
+      resolverPlanEl.innerHTML = `<div class="snapshot-grid">${cards}</div>
+        ${rows || `<div class="sample">No resolver plan groups available.</div>`}`;
+    }
+
+    function renderProviderSurfacePlan(plan) {
+      const kpis = plan.kpis || {};
+      const proof = (plan.answers && plan.answers.what_proof_exists) || {};
+      const items = (plan.items || []).slice(0, 8);
+      const cards = [
+        snapshotCard("Provider Surfaces", kpis.provider_surfaces, "Controlled provider hint families"),
+        snapshotCard("Hint Total", kpis.provider_hint_total, "Provider/surface hints across resolver groups"),
+        snapshotCard("Provider Reads", kpis.provider_backed_read_resolvers_available, "Existing provider-read resolver families"),
+        snapshotCard("Planned Resolvers", kpis.planned_provider_resolvers, "Provider resolvers still plan-only")
+      ].join("");
+      const rows = items.map(item => `
+        <article class="action">
+          <div class="row">
+            <span class="priority ${item.provider_backed_read_available ? "p1" : "p0"}">${escapeHtml(item.provider || "provider")}</span>
+            <div>
+              <div class="title">${escapeHtml(item.title || item.provider)} | ${escapeHtml(item.resolver_candidate || "")}</div>
+              <div class="hint">${escapeHtml(item.hint_count)} hints | ${escapeHtml(item.related_findings)} related findings | ${escapeHtml(item.coverage_state)}</div>
+              <div class="hint">proof ${escapeHtml(item.proof_goal || "required")} | provider read ${escapeHtml(item.provider_backed_read_available)}</div>
+            </div>
+          </div>
+          <div class="sample">${escapeHtml(item.next_build_step || "")}</div>
+        </article>
+      `).join("");
+      providerSurfacePlanEl.innerHTML = `<div class="snapshot-grid">${cards}</div>
+        <div class="sample">Provider surface plan ${escapeHtml(plan.status || "unknown")} | controlled hints ${escapeHtml(proof.provider_hints_are_controlled_slugs)} | provider automation ${escapeHtml(kpis.provider_backed_automation || 0)} | sends ${escapeHtml(kpis.send_allowed || 0)}</div>
+        ${rows || `<div class="sample">No provider surface hints available.</div>`}`;
+    }
+
+    function renderGitHubResolver(snapshot) {
+      const kpis = snapshot.kpis || {};
+      const auth = snapshot.auth || {};
+      const proof = (snapshot.answers && snapshot.answers.what_proof_exists) || {};
+      const cards = [
+        snapshotCard("GitHub Actions", kpis.planned_github_actions, "Resolver groups needing GitHub official checks"),
+        snapshotCard("Provider Read", kpis.provider_backed_read, "Bounded gh/API reads that succeeded"),
+        snapshotCard("Receipt Candidates", proof.receipt_candidates || 0, "Recordable provider-read or blocker proof"),
+        snapshotCard("Open PRs", kpis.open_pull_requests, "Redacted official PR search count")
+      ].join("");
+      const candidates = (snapshot.actions || []).slice(0, 4).map(item => {
+        const receipt = item.receipt_candidate || {};
+        return `<div class="sample">${escapeHtml(item.action_id || "")} | ${escapeHtml(receipt.resolver_status || item.github_snapshot_status || "")} | ${escapeHtml(receipt.reason_code || "")} | provider read ${escapeHtml(receipt.provider_backed_read)} | record ${escapeHtml(receipt.operator_must_record_receipt)}</div>`;
+      }).join("");
+      githubResolverEl.innerHTML = `<div class="snapshot-grid">${cards}</div>
+        <div class="sample">GitHub resolver status ${escapeHtml(snapshot.status || "unknown")} | gh ${escapeHtml(auth.gh_cli_available)} | auth ${escapeHtml(auth.github_auth_available)} | repos hashed ${escapeHtml(snapshot.privacy && snapshot.privacy.repository_names_hashed)} | sends ${escapeHtml(kpis.send_allowed || 0)} | mutations ${escapeHtml(kpis.portal_mutations_allowed || 0)}</div>
+        ${candidates || `<div class="sample">No GitHub resolver candidates available.</div>`}`;
+    }
+
+    function renderFollowupResolver(snapshot) {
+      const kpis = snapshot.kpis || {};
+      const proof = (snapshot.answers && snapshot.answers.what_proof_exists) || {};
+      const cards = [
+        snapshotCard("Follow-up Findings", kpis.planned_followup_findings, "Mail or LinkedIn reply candidates"),
+        snapshotCard("Approvals", kpis.approved_drafts, "Approved local draft receipts"),
+        snapshotCard("Delivery Receipts", kpis.delivery_receipts, "Local delivery intent/status proof"),
+        snapshotCard("Receipt Candidates", proof.receipt_candidates || 0, "Recordable follow-up proof")
+      ].join("");
+      const candidates = (snapshot.actions || []).slice(0, 4).map(item => {
+        const receipt = item.receipt_candidate || {};
+        return `<div class="sample">${escapeHtml(item.action_id || "")} | ${escapeHtml(receipt.resolver_status || item.followup_snapshot_status || "")} | ${escapeHtml(receipt.proof_type || "")} | delivery ${escapeHtml(item.delivery_receipts || 0)} | record ${escapeHtml(receipt.operator_must_record_receipt)}</div>`;
+      }).join("");
+      followupResolverEl.innerHTML = `<div class="snapshot-grid">${cards}</div>
+        <div class="sample">Follow-up resolver status ${escapeHtml(snapshot.status || "unknown")} | sends ${escapeHtml(kpis.send_allowed || 0)} | mailbox mutations ${escapeHtml(kpis.mailbox_mutations_allowed || 0)} | provider automation ${escapeHtml(kpis.provider_backed_automation || 0)}</div>
+        ${candidates || `<div class="sample">No follow-up resolver candidates available.</div>`}`;
+    }
+
+    function renderExternalResolver(snapshot) {
+      const kpis = snapshot.kpis || {};
+      const proof = (snapshot.answers && snapshot.answers.what_proof_exists) || {};
+      const cards = [
+        snapshotCard("External Findings", kpis.planned_external_findings, "Provider, security, billing, subscription, legal"),
+        snapshotCard("Provider", kpis.provider_reconcile, "Provider dashboard, API, or CLI"),
+        snapshotCard("Security", kpis.security_verify, "Account/security official checks"),
+        snapshotCard("Receipt Candidates", proof.receipt_candidates || 0, "Explicit blocker attestations")
+      ].join("");
+      const providerHints = Object.entries(kpis.provider_hint_counts || {}).slice(0, 6).map(([name, count]) =>
+        `<span class="tag">${escapeHtml(name)}: ${escapeHtml(count)}</span>`
+      ).join("");
+      const candidates = (snapshot.actions || []).slice(0, 4).map(item => {
+        const receipt = item.receipt_candidate || {};
+        const hints = (item.provider_hints || []).slice(0, 4).join(", ");
+        return `<div class="sample">${escapeHtml(item.action_id || "")} | ${escapeHtml(item.resolver_type || "")} | ${escapeHtml(receipt.resolver_status || item.external_snapshot_status || "")} | hints ${escapeHtml(hints || "none")} | receipts ${escapeHtml(item.existing_resolver_receipts || 0)} | record ${escapeHtml(receipt.operator_must_record_receipt)}</div>`;
+      }).join("");
+      externalResolverEl.innerHTML = `<div class="snapshot-grid">${cards}</div>
+        <div class="tags">${providerHints}</div>
+        <div class="sample">External resolver status ${escapeHtml(snapshot.status || "unknown")} | provider read ${escapeHtml(kpis.provider_backed_read || 0)} | portal mutations ${escapeHtml(kpis.portal_mutations_allowed || 0)} | sends ${escapeHtml(kpis.send_allowed || 0)}</div>
+        ${candidates || `<div class="sample">No external resolver candidates available.</div>`}`;
+    }
+
+    function renderActionLedger(ledger) {
+      const kpis = ledger.kpis || {};
+      const items = (ledger.items || []).slice(0, 8);
+      const cards = [
+        snapshotCard("Active", kpis.active, "Open, reviewing, waiting, blocked"),
+        snapshotCard("Waiting", kpis.waiting, "Blocked on reply or external action"),
+        snapshotCard("Blocked", kpis.blocked, "Needs human/provider/legal step"),
+        snapshotCard("Receipts", kpis.receipts, "Local proof records")
+      ].join("");
+      const rows = items.map(item => `
+        <article class="action">
+          <div class="row">
+            <span class="priority ${escapeHtml(item.priority || "")}">${escapeHtml(item.action_status || "open")}</span>
+            <div>
+              <div class="title">${escapeHtml(item.lane_title || item.recommended_lane)} | ${escapeHtml(item.kind)}</div>
+              <div class="hint">${escapeHtml(item.action_id || "")}</div>
+              <div class="hint">${escapeHtml(item.finding_count)} findings | ${escapeHtml(item.reason_code || "no receipt")} | ${escapeHtml(item.proof_scope)}</div>
+            </div>
+          </div>
+          <div class="sample">${escapeHtml(item.next_action)}</div>
+        </article>
+      `).join("");
+      actionLedgerEl.innerHTML = `<div class="snapshot-grid">${cards}</div>
+        ${rows || `<div class="sample">No action ledger items available.</div>`}`;
+    }
+
+    function render(summary) {
+      const source = summary.source || {};
+      const kpis = summary.kpis || {};
+      sourceMetaEl.textContent = `${source.filename || "report"} | ${source.since || "?"} to ${source.until_exclusive || "?"} | generated ${source.generated_at || "unknown"}`;
+      metricsEl.innerHTML = metricDefs.map(([key, label, hint]) => metricCard(label, kpis[key], hint)).join("");
+      renderSnapshot(summary);
+
+      lanesEl.innerHTML = (summary.lanes || []).map(lane => {
+        const labels = (lane.labels || []).map(row =>
+          `<span class="tag">${escapeHtml(row.label)}: ${escapeHtml(row.messages)}/${escapeHtml(row.unread)} unread</span>`
+        ).join("");
+        return `<article class="lane">
+          <div class="row">
+            <div class="title">${escapeHtml(lane.title)}</div>
+            <div class="count">${escapeHtml(lane.messages)} messages | ${escapeHtml(lane.unread)} unread</div>
+          </div>
+          <div class="tags">${labels}</div>
+        </article>`;
+      }).join("") || `<div class="empty">No action lanes in the configured report.</div>`;
+
+      bucketsEl.innerHTML = (summary.buckets || []).map(bucket => {
+        const samples = (bucket.sample_items || []).slice(0, 3).map(item =>
+          `<div class="sample">${escapeHtml(item.state || "state n/a")} | ${escapeHtml(item.scope || "scope n/a")} | ${escapeHtml(item.lane || "lane n/a")} | ${escapeHtml(item.next_action || item.why || "review")}</div>`
+        ).join("");
+        return `<article class="bucket">
+          <div class="row">
+            <div class="title">${escapeHtml(bucket.name)}</div>
+            <div class="count">${escapeHtml(bucket.items)} items | ${escapeHtml(bucket.unread)} unread</div>
+          </div>
+          ${samples}
+        </article>`;
+      }).join("") || `<div class="empty">No buckets in the configured report.</div>`;
+    }
+
+    async function loadHistory(headers) {
+      try {
+        const response = await fetch("/v1/ops/history", { headers });
+        if (!response.ok) {
+          historyEl.innerHTML = `<div class="sample">History unavailable; run ops-refresh and configure UMA_OPS_HISTORY_DIR.</div>`;
+          return;
+        }
+        renderHistory(await response.json());
+      } catch (error) {
+        historyEl.innerHTML = `<div class="sample">History unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadIntelligence(headers) {
+      try {
+        const response = await fetch("/v1/ops/intelligence", { headers });
+        if (!response.ok) {
+          intelligenceEl.innerHTML = `<div class="sample">Historical intelligence unavailable; configure UMA_HISTORICAL_MAIL_PATH.</div>`;
+          return;
+        }
+        renderIntelligence(await response.json());
+      } catch (error) {
+        intelligenceEl.innerHTML = `<div class="sample">Historical intelligence unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadActionPlan(headers) {
+      try {
+        const response = await fetch("/v1/ops/action-plan", { headers });
+        if (!response.ok) {
+          actionPlanEl.innerHTML = `<div class="sample">Action plan unavailable; configure UMA_HISTORICAL_INTELLIGENCE_PATH or UMA_HISTORICAL_MAIL_PATH.</div>`;
+          return;
+        }
+        renderActionPlan(await response.json());
+      } catch (error) {
+        actionPlanEl.innerHTML = `<div class="sample">Action plan unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadResolverPlan(headers = null) {
+      const requestHeaders = headers || {};
+      if (!headers && tokenEl.value.trim()) {
+        requestHeaders.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/resolver-plan", { headers: requestHeaders });
+        if (!response.ok) {
+          resolverPlanEl.innerHTML = `<div class="sample">Resolver plan unavailable; configure UMA_HISTORICAL_INTELLIGENCE_PATH or UMA_HISTORICAL_MAIL_PATH.</div>`;
+          return;
+        }
+        renderResolverPlan(await response.json());
+      } catch (error) {
+        resolverPlanEl.innerHTML = `<div class="sample">Resolver plan unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadProviderSurfacePlan(headers = null) {
+      const requestHeaders = headers || {};
+      if (!headers && tokenEl.value.trim()) {
+        requestHeaders.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/provider-surface-plan?max_items=12", { headers: requestHeaders });
+        if (!response.ok) {
+          providerSurfacePlanEl.innerHTML = `<div class="sample">Provider surface plan unavailable; configure UMA_HISTORICAL_INTELLIGENCE_PATH or UMA_HISTORICAL_MAIL_PATH.</div>`;
+          return;
+        }
+        renderProviderSurfacePlan(await response.json());
+      } catch (error) {
+        providerSurfacePlanEl.innerHTML = `<div class="sample">Provider surface plan unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadResolverLedger(headers = null) {
+      const requestHeaders = headers || {};
+      if (!headers && tokenEl.value.trim()) {
+        requestHeaders.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/resolver-ledger?max_items=10&max_receipts=10", { headers: requestHeaders });
+        if (!response.ok) {
+          resolverLedgerEl.innerHTML = `<div class="sample">Resolver ledger unavailable; configure UMA_HISTORICAL_INTELLIGENCE_PATH or UMA_HISTORICAL_MAIL_PATH.</div>`;
+          return;
+        }
+        const ledger = await response.json();
+        const kpis = ledger.kpis || {};
+        resolverLedgerEl.innerHTML = `<div class="sample">Resolver proof: not started ${escapeHtml(kpis.not_started || 0)} | waiting ${escapeHtml(kpis.verified_waiting || 0)} | blocked ${escapeHtml(kpis.verified_blocked || 0)} | resolved ${escapeHtml(kpis.verified_resolved || 0)} | receipts ${escapeHtml(kpis.receipts || 0)} | provider backed ${escapeHtml(kpis.provider_backed_receipts || 0)}</div>`;
+      } catch (error) {
+        resolverLedgerEl.innerHTML = `<div class="sample">Resolver ledger unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadGitHubResolver(headers = null) {
+      const requestHeaders = headers || {};
+      if (!headers && tokenEl.value.trim()) {
+        requestHeaders.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/github-resolver?max_items=10&query_limit=25", { headers: requestHeaders });
+        if (!response.ok) {
+          githubResolverEl.innerHTML = `<div class="sample">GitHub resolver unavailable; configure UMA_HISTORICAL_INTELLIGENCE_PATH or UMA_HISTORICAL_MAIL_PATH.</div>`;
+          return;
+        }
+        renderGitHubResolver(await response.json());
+      } catch (error) {
+        githubResolverEl.innerHTML = `<div class="sample">GitHub resolver unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function recordGitHubResolverReceipts() {
+      const headers = { "Content-Type": "application/json" };
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/github-resolver-receipts", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            max_items: 10,
+            max_receipts: 10,
+            query_limit: 25,
+            include_provider_queries: true
+          })
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          githubResolverEl.innerHTML = `<div class="sample">GitHub proof not recorded: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const result = await response.json();
+        const kpis = result.kpis || {};
+        githubResolverEl.innerHTML = `<div class="sample">Recorded ${escapeHtml(kpis.receipts_recorded || 0)} GitHub resolver receipts | provider-read ${escapeHtml(kpis.provider_backed_read_receipts || 0)} | operator-attested ${escapeHtml(kpis.operator_attestation_receipts || 0)} | automation ${escapeHtml(kpis.provider_backed_automation || 0)} | sends ${escapeHtml(kpis.send_allowed || 0)}</div>`;
+        const reloadHeaders = {};
+        if (tokenEl.value.trim()) {
+          reloadHeaders.Authorization = `Bearer ${tokenEl.value.trim()}`;
+        }
+        await loadResolverLedger(reloadHeaders);
+      } catch (error) {
+        githubResolverEl.innerHTML = `<div class="sample">GitHub proof not recorded: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadFollowupResolver(headers = null) {
+      const requestHeaders = headers || {};
+      if (!headers && tokenEl.value.trim()) {
+        requestHeaders.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/followup-resolver?max_items=10", { headers: requestHeaders });
+        if (!response.ok) {
+          followupResolverEl.innerHTML = `<div class="sample">Follow-up resolver unavailable; configure UMA_HISTORICAL_INTELLIGENCE_PATH or UMA_HISTORICAL_MAIL_PATH.</div>`;
+          return;
+        }
+        renderFollowupResolver(await response.json());
+      } catch (error) {
+        followupResolverEl.innerHTML = `<div class="sample">Follow-up resolver unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function recordFollowupResolverReceipts() {
+      const headers = { "Content-Type": "application/json" };
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/followup-resolver-receipts", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            max_items: 10,
+            max_receipts: 10
+          })
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          followupResolverEl.innerHTML = `<div class="sample">Follow-up proof not recorded: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const result = await response.json();
+        const kpis = result.kpis || {};
+        followupResolverEl.innerHTML = `<div class="sample">Recorded ${escapeHtml(kpis.receipts_recorded || 0)} follow-up resolver receipts | operator-attested ${escapeHtml(kpis.operator_attestation_receipts || 0)} | automation ${escapeHtml(kpis.provider_backed_automation || 0)} | sends ${escapeHtml(kpis.send_allowed || 0)}</div>`;
+        const reloadHeaders = {};
+        if (tokenEl.value.trim()) {
+          reloadHeaders.Authorization = `Bearer ${tokenEl.value.trim()}`;
+        }
+        await loadResolverLedger(reloadHeaders);
+      } catch (error) {
+        followupResolverEl.innerHTML = `<div class="sample">Follow-up proof not recorded: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadExternalResolver(headers = null) {
+      const requestHeaders = headers || {};
+      if (!headers && tokenEl.value.trim()) {
+        requestHeaders.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/external-resolver?max_items=10", { headers: requestHeaders });
+        if (!response.ok) {
+          externalResolverEl.innerHTML = `<div class="sample">External resolver unavailable; configure UMA_HISTORICAL_INTELLIGENCE_PATH or UMA_HISTORICAL_MAIL_PATH.</div>`;
+          return;
+        }
+        renderExternalResolver(await response.json());
+      } catch (error) {
+        externalResolverEl.innerHTML = `<div class="sample">External resolver unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function recordExternalResolverReceipts() {
+      const headers = { "Content-Type": "application/json" };
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/external-resolver-receipts", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            max_items: 10,
+            max_receipts: 10,
+            attest_blockers: true
+          })
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          externalResolverEl.innerHTML = `<div class="sample">External blocker proof not recorded: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const result = await response.json();
+        const kpis = result.kpis || {};
+        externalResolverEl.innerHTML = `<div class="sample">Recorded ${escapeHtml(kpis.receipts_recorded || 0)} external blocker receipts | operator-attested ${escapeHtml(kpis.operator_attestation_receipts || 0)} | provider read ${escapeHtml(kpis.provider_backed_read_receipts || 0)} | automation ${escapeHtml(kpis.provider_backed_automation || 0)} | sends ${escapeHtml(kpis.send_allowed || 0)}</div>`;
+        const reloadHeaders = {};
+        if (tokenEl.value.trim()) {
+          reloadHeaders.Authorization = `Bearer ${tokenEl.value.trim()}`;
+        }
+        await loadResolverLedger(reloadHeaders);
+      } catch (error) {
+        externalResolverEl.innerHTML = `<div class="sample">External blocker proof not recorded: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function recordResolverReceipt() {
+      const actionId = resolverActionIdEl.value.trim();
+      if (!actionId) {
+        resolverLedgerEl.innerHTML = `<div class="sample">Enter an action id.</div>`;
+        return;
+      }
+      const headers = { "Content-Type": "application/json" };
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/resolver-receipts", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            action_id: actionId,
+            resolver_status: resolverStatusEl.value,
+            reason_code: resolverReasonEl.value,
+            proof_type: resolverProofTypeEl.value,
+            provider: resolverProviderEl.value || "manual",
+            external_reference: resolverExternalRefEl.value || null
+          })
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          resolverLedgerEl.innerHTML = `<div class="sample">Resolver receipt not recorded: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const receipt = await response.json();
+        resolverLedgerEl.innerHTML = `<div class="sample">Recorded ${escapeHtml(receipt.receipt_id)} | ${escapeHtml(receipt.resolver_status)} | provider read ${escapeHtml(receipt.safety && receipt.safety.provider_backed_read)} | automation ${escapeHtml(receipt.safety && receipt.safety.provider_backed_automation)} | send allowed ${escapeHtml(receipt.safety && receipt.safety.send_allowed)}</div>`;
+      } catch (error) {
+        resolverLedgerEl.innerHTML = `<div class="sample">Resolver receipt not recorded: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadActionLedger(headers) {
+      try {
+        const response = await fetch("/v1/ops/action-ledger", { headers });
+        if (!response.ok) {
+          actionLedgerEl.innerHTML = `<div class="sample">Action ledger unavailable; configure UMA_HISTORICAL_INTELLIGENCE_PATH or UMA_HISTORICAL_MAIL_PATH.</div>`;
+          return;
+        }
+        renderActionLedger(await response.json());
+      } catch (error) {
+        actionLedgerEl.innerHTML = `<div class="sample">Action ledger unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function recordActionReceipt() {
+      const actionId = receiptActionIdEl.value.trim();
+      if (!actionId) {
+        ledgerReceiptEl.innerHTML = `<div class="sample">Enter an action id.</div>`;
+        return;
+      }
+      const headers = { "Content-Type": "application/json" };
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/action-receipts", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            action_id: actionId,
+            action_status: receiptStatusEl.value,
+            reason_code: receiptReasonEl.value
+          })
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          ledgerReceiptEl.innerHTML = `<div class="sample">Receipt not recorded: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const receipt = await response.json();
+        ledgerReceiptEl.innerHTML = `<div class="sample">Recorded ${escapeHtml(receipt.receipt_id)} for ${escapeHtml(receipt.action_status)}.</div>`;
+        const headersForReload = {};
+        if (tokenEl.value.trim()) {
+          headersForReload.Authorization = `Bearer ${tokenEl.value.trim()}`;
+        }
+        await loadActionLedger(headersForReload);
+      } catch (error) {
+        ledgerReceiptEl.innerHTML = `<div class="sample">Receipt not recorded: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadEvidenceReview() {
+      const evidenceId = evidenceIdEl.value.trim();
+      if (!evidenceId) {
+        evidenceReviewEl.innerHTML = `<div class="sample">Enter an evidence id.</div>`;
+        return;
+      }
+      if (!ackPrivateEl.checked) {
+        evidenceReviewEl.innerHTML = `<div class="sample">Check private to acknowledge raw source mail will be shown.</div>`;
+        return;
+      }
+      const headers = {};
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      const url = `/v1/ops/evidence/${encodeURIComponent(evidenceId)}?ack_private=true&body_char_limit=2400&context_limit=4`;
+      try {
+        const response = await fetch(url, { headers });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          evidenceReviewEl.innerHTML = `<div class="sample">Private evidence unavailable: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const review = await response.json();
+        const message = review.message || {};
+        evidenceReviewEl.innerHTML = `<div class="private-message">PRIVATE SOURCE MAIL
+${escapeHtml(message.occurred_at || "unknown")} | ${escapeHtml(message.direction || "unknown")} | ${escapeHtml(message.scope || "unknown")}
+From: ${escapeHtml(message.sender || "")} &lt;${escapeHtml(message.address || "")}&gt;
+Subject: ${escapeHtml(message.subject || "")}
+
+${escapeHtml(message.body || message.snippet || "")}</div>`;
+      } catch (error) {
+        evidenceReviewEl.innerHTML = `<div class="sample">Private evidence unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadDraftPackage() {
+      const actionId = draftActionIdEl.value.trim();
+      if (!actionId) {
+        draftPackageEl.innerHTML = `<div class="sample">Enter an action id.</div>`;
+        return;
+      }
+      if (!ackDraftPrivateEl.checked) {
+        draftPackageEl.innerHTML = `<div class="sample">Check private to acknowledge draft content will be shown.</div>`;
+        return;
+      }
+      const headers = {};
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      const url = `/v1/ops/draft-package/${encodeURIComponent(actionId)}?ack_private=true&max_drafts=1&body_char_limit=1800`;
+      try {
+        const response = await fetch(url, { headers });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          draftPackageEl.innerHTML = `<div class="sample">Draft package unavailable: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const pkg = await response.json();
+        const draft = (pkg.drafts || [])[0] || {};
+        const to = draft.to || {};
+        if (draft.draft_id) {
+          draftApprovalIdEl.value = draft.draft_id;
+        }
+        draftPackageEl.innerHTML = `<div class="private-message">PRIVATE DRAFT PACKAGE
+To: ${escapeHtml(to.name || "")} &lt;${escapeHtml(to.address || "")}&gt;
+Subject: ${escapeHtml(draft.subject || "")}
+
+${escapeHtml(draft.body || "")}
+
+Approval required: ${escapeHtml(draft.approval && draft.approval.required)}
+Send allowed: ${escapeHtml(draft.approval && draft.approval.send_allowed)}</div>`;
+      } catch (error) {
+        draftPackageEl.innerHTML = `<div class="sample">Draft package unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function recordDraftApproval() {
+      const actionId = draftActionIdEl.value.trim();
+      const draftId = draftApprovalIdEl.value.trim();
+      if (!actionId || !draftId) {
+        draftApprovalEl.innerHTML = `<div class="sample">Enter action id and draft id.</div>`;
+        return;
+      }
+      if (!ackDraftPrivateEl.checked) {
+        draftApprovalEl.innerHTML = `<div class="sample">Check private to acknowledge draft content was reviewed.</div>`;
+        return;
+      }
+      const headers = { "Content-Type": "application/json" };
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch(`/v1/ops/draft-approvals/${encodeURIComponent(actionId)}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            ack_private: true,
+            draft_id: draftId,
+            decision: draftDecisionEl.value,
+            reason_code: draftReasonEl.value,
+            max_drafts: 3
+          })
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          draftApprovalEl.innerHTML = `<div class="sample">Draft approval not recorded: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const receipt = await response.json();
+        draftApprovalEl.innerHTML = `<div class="sample">Recorded ${escapeHtml(receipt.receipt_id)} | ${escapeHtml(receipt.decision)} | send allowed ${escapeHtml(receipt.safety && receipt.safety.send_allowed)}.</div>`;
+      } catch (error) {
+        draftApprovalEl.innerHTML = `<div class="sample">Draft approval not recorded: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadDraftApprovals() {
+      const actionId = draftActionIdEl.value.trim();
+      if (!actionId) {
+        draftApprovalEl.innerHTML = `<div class="sample">Enter an action id.</div>`;
+        return;
+      }
+      if (!ackDraftPrivateEl.checked) {
+        draftApprovalEl.innerHTML = `<div class="sample">Check private to acknowledge draft approval state will be validated.</div>`;
+        return;
+      }
+      const headers = {};
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch(`/v1/ops/draft-approvals/${encodeURIComponent(actionId)}?ack_private=true&max_drafts=3`, { headers });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          draftApprovalEl.innerHTML = `<div class="sample">Draft approvals unavailable: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const ledger = await response.json();
+        const kpis = ledger.kpis || {};
+        draftApprovalEl.innerHTML = `<div class="sample">Draft approvals: pending ${escapeHtml(kpis.pending || 0)} | approved ${escapeHtml(kpis.approved || 0)} | revise ${escapeHtml(kpis.revise || 0)} | rejected ${escapeHtml(kpis.rejected || 0)} | send allowed ${escapeHtml(kpis.send_allowed || 0)}</div>`;
+      } catch (error) {
+        draftApprovalEl.innerHTML = `<div class="sample">Draft approvals unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function recordDeliveryReceipt() {
+      const actionId = draftActionIdEl.value.trim();
+      const draftId = draftApprovalIdEl.value.trim();
+      if (!actionId || !draftId) {
+        deliveryLedgerEl.innerHTML = `<div class="sample">Enter action id and draft id.</div>`;
+        return;
+      }
+      if (!ackDraftPrivateEl.checked) {
+        deliveryLedgerEl.innerHTML = `<div class="sample">Check private to validate approved draft state.</div>`;
+        return;
+      }
+      const headers = { "Content-Type": "application/json" };
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch(`/v1/ops/delivery/${encodeURIComponent(actionId)}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            ack_private: true,
+            draft_id: draftId,
+            delivery_status: deliveryStatusEl.value,
+            reason_code: deliveryReasonEl.value,
+            provider: deliveryProviderEl.value || "manual",
+            external_reference: deliveryExternalRefEl.value || null,
+            max_drafts: 3
+          })
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          deliveryLedgerEl.innerHTML = `<div class="sample">Delivery receipt not recorded: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const receipt = await response.json();
+        deliveryLedgerEl.innerHTML = `<div class="sample">Recorded ${escapeHtml(receipt.receipt_id)} | ${escapeHtml(receipt.delivery_status)} | UMA draft ${escapeHtml(receipt.safety && receipt.safety.uma_created_provider_draft)} | UMA sent ${escapeHtml(receipt.safety && receipt.safety.uma_sent_message)}</div>`;
+      } catch (error) {
+        deliveryLedgerEl.innerHTML = `<div class="sample">Delivery receipt not recorded: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadDeliveryLedger() {
+      const actionId = draftActionIdEl.value.trim();
+      if (!actionId) {
+        deliveryLedgerEl.innerHTML = `<div class="sample">Enter an action id.</div>`;
+        return;
+      }
+      if (!ackDraftPrivateEl.checked) {
+        deliveryLedgerEl.innerHTML = `<div class="sample">Check private to validate approved draft state.</div>`;
+        return;
+      }
+      const headers = {};
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch(`/v1/ops/delivery/${encodeURIComponent(actionId)}?ack_private=true&max_drafts=3`, { headers });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          deliveryLedgerEl.innerHTML = `<div class="sample">Delivery ledger unavailable: ${escapeHtml(body.detail || response.statusText)}</div>`;
+          return;
+        }
+        const ledger = await response.json();
+        const kpis = ledger.kpis || {};
+        deliveryLedgerEl.innerHTML = `<div class="sample">Delivery: ready ${escapeHtml(kpis.ready_for_provider_draft || 0)} | draft requested ${escapeHtml(kpis.provider_draft_requested || 0)} | draft recorded ${escapeHtml(kpis.provider_draft_recorded || 0)} | send requested ${escapeHtml(kpis.send_requested || 0)} | sent recorded ${escapeHtml(kpis.sent_recorded || 0)} | UMA sends ${escapeHtml(kpis.uma_sends || 0)}</div>`;
+      } catch (error) {
+        deliveryLedgerEl.innerHTML = `<div class="sample">Delivery ledger unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadSummary() {
+      setStatus("Loading operator summary...");
+      const headers = {};
+      if (tokenEl.value.trim()) {
+        headers.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/summary", { headers });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          const detail = body.detail || response.statusText;
+          setStatus(`Operator summary unavailable: ${detail}`, "bad");
+          return;
+        }
+        const summary = await response.json();
+        render(summary);
+        await loadHistory(headers);
+        await loadIntelligence(headers);
+        await loadActionPlan(headers);
+        await loadResolverPlan(headers);
+        await loadProviderSurfacePlan(headers);
+        await loadResolverLedger(headers);
+        await loadGitHubResolver(headers);
+        await loadFollowupResolver(headers);
+        await loadExternalResolver(headers);
+        await loadActionLedger(headers);
+        const freshness = summary.freshness || {};
+        setStatus(`Loaded ${summary.schema || "ops summary"}; freshness=${freshness.status || "unknown"}; privacy redacted=${Boolean(summary.privacy && summary.privacy.redacted)}.`, freshness.is_stale ? "bad" : "good");
+      } catch (error) {
+        setStatus(`Cannot reach the operator API: ${error.message}`, "bad");
+      }
+    }
+
+    document.getElementById("refresh").addEventListener("click", loadSummary);
+    document.getElementById("loadResolverPlan").addEventListener("click", () => loadResolverPlan());
+    document.getElementById("loadProviderSurfacePlan").addEventListener("click", () => loadProviderSurfacePlan());
+    document.getElementById("loadGitHubResolver").addEventListener("click", () => loadGitHubResolver());
+    document.getElementById("recordGitHubResolverReceipts").addEventListener("click", recordGitHubResolverReceipts);
+    document.getElementById("loadFollowupResolver").addEventListener("click", () => loadFollowupResolver());
+    document.getElementById("recordFollowupResolverReceipts").addEventListener("click", recordFollowupResolverReceipts);
+    document.getElementById("loadExternalResolver").addEventListener("click", () => loadExternalResolver());
+    document.getElementById("recordExternalResolverReceipts").addEventListener("click", recordExternalResolverReceipts);
+    document.getElementById("recordResolverReceipt").addEventListener("click", recordResolverReceipt);
+    document.getElementById("loadResolverLedger").addEventListener("click", () => loadResolverLedger());
+    document.getElementById("recordReceipt").addEventListener("click", recordActionReceipt);
+    document.getElementById("reviewEvidence").addEventListener("click", loadEvidenceReview);
+    document.getElementById("buildDraftPackage").addEventListener("click", loadDraftPackage);
+    document.getElementById("recordDraftApproval").addEventListener("click", recordDraftApproval);
+    document.getElementById("loadDraftApprovals").addEventListener("click", loadDraftApprovals);
+    document.getElementById("recordDeliveryReceipt").addEventListener("click", recordDeliveryReceipt);
+    document.getElementById("loadDeliveryLedger").addEventListener("click", loadDeliveryLedger);
+    loadSummary();
+  </script>
+</body>
+</html>

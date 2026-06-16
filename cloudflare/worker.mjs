@@ -248,11 +248,34 @@ function senderCheck(sender) {
   };
 }
 
-function triagePreview(provider, limit) {
+function isoNow() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function buildPacket({ provider, query, limit, result, runId }) {
+  const resultCopy = JSON.parse(JSON.stringify(result));
+  return {
+    schema: "uma.intake.packet.v1",
+    product: "uma",
+    surface: "cloudflare-worker",
+    operation: "triage",
+    status: "ok",
+    timestamp: isoNow(),
+    run_id: runId,
+    request: { provider, query, limit, dry_run: true },
+    payload: {
+      surface: "cloudflare-worker",
+      result: resultCopy,
+      request: { provider, query, limit, dry_run: true },
+    },
+  };
+}
+
+function triagePreview(provider, limit, query) {
   const capped = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 50) : 50;
   const archived = capped > 0 ? 1 : 0;
   const protectedHeld = capped > 1 ? 2 : Math.max(0, capped - archived);
-  return {
+  const result = {
     dry_run: true,
     provider,
     receipt: `Triage receipt: ${Math.max(capped, 3)} message(s) — ${protectedHeld} protected held in inbox, ${archived} would leave inbox, 0 labeled-inbox, 0 kept.`,
@@ -274,6 +297,14 @@ function triagePreview(provider, limit) {
     },
     run_id: "demo_preview",
   };
+  result.packet = buildPacket({
+    provider,
+    query: query || "has:nouserlabels",
+    limit: capped,
+    result,
+    runId: "demo_preview",
+  });
+  return result;
 }
 
 function billingPlans() {
@@ -443,12 +474,20 @@ export default {
 
     if (url.pathname === "/v1/triage/preview" && request.method === "POST") {
       const body = await readJson(request);
-      return json(triagePreview(body.provider || "demo", Number(body.limit)));
+      return json(triagePreview(
+        body.provider || "demo",
+        Number(body.limit),
+        body.query || "has:nouserlabels",
+      ));
     }
 
     if (url.pathname === "/v1/triage" && request.method === "POST") {
       const body = await readJson(request);
-      return json(triagePreview(body.provider || "demo", Number(body.limit)));
+      return json(triagePreview(
+        body.provider || "demo",
+        Number(body.limit),
+        body.query || "has:nouserlabels",
+      ));
     }
 
     if (url.pathname === "/v1/billing/plans" && request.method === "GET") {
@@ -508,6 +547,21 @@ export default {
       }
       return json({
         run_id: runId,
+        packet: {
+          schema: "uma.intake.packet.v1",
+          product: "uma",
+          surface: "cloudflare-worker",
+          operation: "triage_receipt_lookup",
+          status: DEMO_RUN_IDS.has(runId) ? "ok" : "error",
+          timestamp: isoNow(),
+          run_id: runId,
+          request: { run_id: runId },
+          payload: {
+            surface: "cloudflare-worker",
+            request: { run_id: runId },
+            result: { run_id: runId, available: DEMO_RUN_IDS.has(runId) },
+          },
+        },
         demo: true,
         signed: false,
         signature: null,

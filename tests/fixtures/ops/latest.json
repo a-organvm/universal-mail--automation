@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-06-15 12:31:01 EDT",
+  "since": "2026-05-01",
+  "until_exclusive": "2026-06-16",
+  "apply_mode": true,
+  "scope_counts": {
+    "Inbox including Gmail label": {
+      "messages": 10,
+      "unread": 4
+    },
+    "Gmail All Mail": {
+      "messages": 100,
+      "unread": 8
+    },
+    "Archive equivalent": {
+      "messages": 90,
+      "unread": 4
+    },
+    "All scoped non-deleted": {
+      "messages": 110,
+      "unread": 12
+    }
+  },
+  "rollups": {
+    "top_labels": [
+      {
+        "label": "Mail Triage/Provider Action Needed 2026-06-15",
+        "messages": 3,
+        "unread": 2
+      },
+      {
+        "label": "Mail Triage/Provider Security Verify 2026-06-15",
+        "messages": 5,
+        "unread": 4
+      },
+      {
+        "label": "Mail Triage/Reviewed Closed 2026-06-15",
+        "messages": 7,
+        "unread": 0
+      }
+    ]
+  },
+  "buckets": {
+    "Review": [
+      {
+        "rowid": 123,
+        "conversation_id": 456,
+        "received": "2026-06-15 10:45",
+        "state": "unread",
+        "sender": "Private Person",
+        "address": "private@example.test",
+        "subject": "Private matter should not leak",
+        "body": "Synthetic body that must not appear in operator summaries.",
+        "scope": "Inbox",
+        "labels": [
+          "INBOX",
+          "Mail Triage/Provider Security Verify 2026-06-15"
+        ],
+        "why": "Unread security item needs portal verification.",
+        "next_action": "Verify directly in the provider account."
+      }
+    ],
+    "Waiting / Verify": [
+      {
+        "rowid": 789,
+        "conversation_id": 101112,
+        "received": "2026-06-14 09:15",
+        "state": "read",
+        "sender": "Private Sender",
+        "address": "private-sender@example.test",
+        "subject": "Outbound legal reply should not leak",
+        "body": "Second synthetic body that must not appear.",
+        "scope": "All Mail",
+        "labels": [
+          "Mail Triage/Legal Sent 2026-06-15"
+        ],
+        "why": "Latest item is outbound.",
+        "next_action": "Wait for the other party."
+      }
+    ]
+  }
+}

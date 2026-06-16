@@ -14,10 +14,14 @@ Environment:
 """
 
 import argparse
+import dataclasses
 import logging
+import json
 import os
+import secrets
 import sys
 import time
+from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -452,6 +456,42 @@ def cmd_label(args: argparse.Namespace) -> int:
     print_stats(result)
 
     violation = _report_audit(audit)
+    if getattr(args, "intake_json", False):
+        from core.intake import build_triage_intake_packet
+
+        audit_payload = audit.summary() if audit is not None else {
+            "total": 0,
+            "protected_held": 0,
+            "archived": 0,
+            "moved": 0,
+            "labeled": 0,
+            "kept": 0,
+            "violations": [],
+        }
+        packet = build_triage_intake_packet(
+            surface="cli-label",
+            run_id=f"cli_{secrets.token_hex(8)}",
+            provider=args.provider,
+            dry_run=args.dry_run,
+            query=args.query,
+            limit=args.limit,
+            result={
+                "dry_run": args.dry_run,
+                "provider": args.provider,
+                "receipt": audit.receipt_line() if audit is not None else "",
+                "audit": audit_payload,
+                "processed": dataclasses.asdict(result),
+            },
+            actor={"type": "cli", "command": "label"},
+            auth={"mode": "tool"},
+            extra={
+                "state_file": args.state_file,
+                "remove_label": args.remove_label,
+                "redact_audit": bool(getattr(args, "redact_audit", False)),
+            },
+        )
+        print(json.dumps(packet))
+
     if violation:
         return 2
     return 0 if result.error_count == 0 else 1
@@ -1007,6 +1047,950 @@ def cmd_triage(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ops_summary(args: argparse.Namespace) -> int:
+    """Emit the canonical redacted operator dashboard summary."""
+    import json
+
+    from core.ops_summary import OpsReportError, build_ops_snapshot
+
+    raw_report = args.report or os.environ.get("UMA_OPS_REPORT_PATH")
+    if not raw_report:
+        print("ops-summary: --report or UMA_OPS_REPORT_PATH is required", file=sys.stderr)
+        return 1
+
+    try:
+        snapshot = build_ops_snapshot(
+            Path(raw_report).expanduser(),
+            max_age_hours=args.max_age_hours,
+        )
+    except OpsReportError as e:
+        print(f"ops-summary: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(snapshot, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_ops_refresh(args: argparse.Namespace) -> int:
+    """Build and persist the redacted operator summary plus bounded history."""
+    import json
+    import subprocess
+
+    from core.ops_summary import OpsReportError, build_ops_snapshot, write_ops_snapshot
+
+    raw_report = args.report or os.environ.get("UMA_OPS_REPORT_PATH")
+    report_dir = Path(
+        args.report_dir
+        or os.environ.get("UMA_OPS_REPORT_DIR")
+        or (Path(raw_report).expanduser().parent if raw_report else "~/System/Reports/mail-triage")
+    ).expanduser()
+
+    if args.run_mail_triage:
+        if not args.since or not args.until:
+            print("ops-refresh: --run-mail-triage requires --since and --until", file=sys.stderr)
+            return 1
+        mail_triage_bin = (
+            args.mail_triage_bin
+            or os.environ.get("UMA_MAIL_TRIAGE_BIN")
+            or "/Users/4jp/.local/bin/mail-triage"
+        )
+        command = [
+            str(Path(mail_triage_bin).expanduser()),
+            "--since",
+            args.since,
+            "--until",
+            args.until,
+            "--report-dir",
+            str(report_dir),
+            "--apply",
+        ]
+        if args.mail_index:
+            command.extend(["--index", str(Path(args.mail_index).expanduser())])
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=os.getcwd(),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        except OSError as e:
+            print(f"ops-refresh: could not run mail-triage producer: {e}", file=sys.stderr)
+            return 1
+        if completed.returncode != 0:
+            print("ops-refresh: mail-triage producer failed", file=sys.stderr)
+            if completed.stderr:
+                print(completed.stderr.strip(), file=sys.stderr)
+            return completed.returncode or 1
+        if not raw_report:
+            raw_report = str(report_dir / "latest.json")
+
+    if not raw_report:
+        print("ops-refresh: --report or UMA_OPS_REPORT_PATH is required", file=sys.stderr)
+        return 1
+
+    output_dir = (
+        args.output_dir
+        or os.environ.get("UMA_OPS_HISTORY_DIR")
+        or "~/.local/state/universal-mail-automation/ops"
+    )
+    try:
+        snapshot = build_ops_snapshot(
+            Path(raw_report).expanduser(),
+            max_age_hours=args.max_age_hours,
+        )
+        refresh = write_ops_snapshot(
+            snapshot,
+            Path(output_dir).expanduser(),
+            history_limit=args.history_limit,
+        )
+    except OpsReportError as e:
+        print(f"ops-refresh: {e.detail}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"ops-refresh: could not write operator snapshot: {e}", file=sys.stderr)
+        return 1
+
+    summary = {
+        key: refresh[key]
+        for key in ("schema", "status", "output_dir", "latest_summary", "history_index", "history_entry")
+    }
+    summary["freshness"] = snapshot.get("freshness")
+    summary["kpis"] = snapshot.get("kpis")
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(summary, indent=indent, sort_keys=args.sort_keys))
+    if args.require_fresh and (snapshot.get("freshness") or {}).get("is_stale"):
+        return 2
+    return 0
+
+
+def cmd_mail_intel(args: argparse.Namespace) -> int:
+    """Emit redacted historical mail intelligence and ops reconciliation."""
+    import json
+
+    from core.historical_intelligence import (
+        HistoricalIntelligenceError,
+        build_historical_intelligence,
+    )
+
+    raw_history = args.history or os.environ.get("UMA_HISTORICAL_MAIL_PATH")
+    if not raw_history:
+        print("mail-intel: --history or UMA_HISTORICAL_MAIL_PATH is required", file=sys.stderr)
+        return 1
+
+    ops_report = args.ops_report or os.environ.get("UMA_OPS_REPORT_PATH")
+    try:
+        snapshot = build_historical_intelligence(
+            Path(raw_history).expanduser(),
+            ops_report_path=Path(ops_report).expanduser() if ops_report else None,
+            stale_days=args.stale_days,
+        )
+    except HistoricalIntelligenceError as e:
+        print(f"mail-intel: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    if args.output:
+        output_path = Path(args.output).expanduser()
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(snapshot, indent=indent, sort_keys=args.sort_keys) + "\n",
+                encoding="utf-8",
+            )
+            stat = output_path.stat()
+        except OSError as e:
+            print(f"mail-intel: could not write output: {e}", file=sys.stderr)
+            return 1
+        receipt = {
+            "schema": "uma.mail.intelligence.receipt.v1",
+            "status": "ok",
+            "output": {
+                "filename": output_path.name,
+                "bytes": stat.st_size,
+                "schema": snapshot.get("schema"),
+                "redacted": True,
+                "message_count": (snapshot.get("source") or {}).get("message_count"),
+                "opportunities": (snapshot.get("kpis") or {}).get("opportunities"),
+                "risks": (snapshot.get("kpis") or {}).get("risks"),
+                "not_represented_in_current_ops": (snapshot.get("kpis") or {}).get("not_represented_in_current_ops"),
+            },
+            "privacy": {
+                "receipt_redacted": True,
+                "raw_mail_printed_to_stdout": False,
+                "output_redacted": True,
+            },
+            "source": snapshot.get("source"),
+        }
+        print(json.dumps(receipt, indent=indent, sort_keys=args.sort_keys))
+        return 0
+
+    print(json.dumps(snapshot, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_history_export(args: argparse.Namespace) -> int:
+    """Write a private normalized historical mail export and print a safe receipt."""
+    import json
+
+    from core.mail_history_export import (
+        MailHistoryExportError,
+        build_mail_history_export,
+        write_mail_history_export,
+    )
+
+    raw_source = args.source or os.environ.get("UMA_HISTORICAL_MAIL_SOURCE")
+    if not raw_source:
+        print("mail-history-export: --source or UMA_HISTORICAL_MAIL_SOURCE is required", file=sys.stderr)
+        return 1
+
+    raw_output = (
+        args.output
+        or os.environ.get("UMA_HISTORICAL_MAIL_PATH")
+        or "~/System/Reports/mail-history/latest.json"
+    )
+    try:
+        export = build_mail_history_export(
+            Path(raw_source).expanduser(),
+            source_type=args.source_type,
+            since=args.since,
+            until_exclusive=args.until,
+            limit=args.limit,
+            body_char_limit=args.body_char_limit,
+            self_addresses=args.self_address or [],
+            mailbox_hint=args.mailbox_hint,
+        )
+        receipt = write_mail_history_export(
+            export,
+            Path(raw_output).expanduser(),
+            pretty=args.pretty_export,
+            sort_keys=args.sort_keys,
+        )
+    except MailHistoryExportError as e:
+        print(f"mail-history-export: {e.detail}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"mail-history-export: could not write export: {e}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(receipt, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_action_plan(args: argparse.Namespace) -> int:
+    """Emit a redacted, approval-aware action plan from intelligence output."""
+    import json
+
+    from core.mail_action_plan import MailActionPlanError, build_action_plan
+
+    raw_intelligence = args.intelligence or os.environ.get("UMA_HISTORICAL_INTELLIGENCE_PATH")
+    if not raw_intelligence:
+        print("mail-action-plan: --intelligence or UMA_HISTORICAL_INTELLIGENCE_PATH is required", file=sys.stderr)
+        return 1
+
+    try:
+        plan = build_action_plan(
+            Path(raw_intelligence).expanduser(),
+            max_items=args.max_items,
+        )
+    except MailActionPlanError as e:
+        print(f"mail-action-plan: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(plan, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_resolver_plan(args: argparse.Namespace) -> int:
+    """Emit redacted lane-specific resolver plans from intelligence output."""
+    import json
+
+    from core.mail_action_ledger import MailActionLedgerError, build_action_plan_for_ledger
+    from core.mail_resolver_plan import MailResolverPlanError, build_resolver_plan
+
+    raw_intelligence = args.intelligence or os.environ.get("UMA_HISTORICAL_INTELLIGENCE_PATH")
+    if not raw_intelligence:
+        print("mail-resolver-plan: --intelligence or UMA_HISTORICAL_INTELLIGENCE_PATH is required", file=sys.stderr)
+        return 1
+
+    try:
+        plan = build_action_plan_for_ledger(
+            Path(raw_intelligence).expanduser(),
+            max_items=max(args.max_items, 10000),
+        )
+        resolver_plan = build_resolver_plan(
+            plan,
+            max_items=args.max_items,
+        )
+    except (MailActionLedgerError, MailResolverPlanError) as e:
+        print(f"mail-resolver-plan: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(resolver_plan, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_provider_surface_plan(args: argparse.Namespace) -> int:
+    """Emit a redacted provider-surface resolver frontier plan."""
+    import json
+
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_resolver_plan import MailResolverPlanError
+    from core.provider_surface_plan import ProviderSurfacePlanError, build_provider_surface_plan
+
+    try:
+        resolver_plan = _build_resolver_plan_for_cli(args)
+        plan = build_provider_surface_plan(
+            resolver_plan,
+            max_items=args.max_items,
+        )
+    except ValueError as e:
+        print(f"mail-provider-surface-plan: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailResolverPlanError, ProviderSurfacePlanError) as e:
+        print(f"mail-provider-surface-plan: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(plan, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def _build_resolver_plan_for_cli(args: argparse.Namespace, *, min_items: int = 10000) -> dict:
+    from core.mail_action_ledger import build_action_plan_for_ledger
+    from core.mail_resolver_plan import build_resolver_plan
+
+    raw_intelligence = args.intelligence or os.environ.get("UMA_HISTORICAL_INTELLIGENCE_PATH")
+    if not raw_intelligence:
+        raise ValueError("--intelligence or UMA_HISTORICAL_INTELLIGENCE_PATH is required")
+    action_plan = build_action_plan_for_ledger(
+        Path(raw_intelligence).expanduser(),
+        max_items=max(args.max_items, min_items),
+    )
+    return build_resolver_plan(action_plan, max_items=max(args.max_items, min_items))
+
+
+def _default_action_ledger_path() -> str:
+    return "~/.local/state/universal-mail-automation/mail-action-ledger.jsonl"
+
+
+def _default_resolver_ledger_path() -> str:
+    return "~/.local/state/universal-mail-automation/mail-resolver-ledger.jsonl"
+
+
+def _default_draft_approval_path() -> str:
+    return "~/.local/state/universal-mail-automation/mail-draft-approvals.jsonl"
+
+
+def _default_delivery_ledger_path() -> str:
+    return "~/.local/state/universal-mail-automation/mail-delivery-ledger.jsonl"
+
+
+def cmd_mail_action_ledger(args: argparse.Namespace) -> int:
+    """Emit redacted action status merged with local receipts."""
+    import json
+
+    from core.mail_action_ledger import (
+        MailActionLedgerError,
+        build_action_ledger,
+        build_action_plan_for_ledger,
+    )
+
+    raw_intelligence = args.intelligence or os.environ.get("UMA_HISTORICAL_INTELLIGENCE_PATH")
+    if not raw_intelligence:
+        print("mail-action-ledger: --intelligence or UMA_HISTORICAL_INTELLIGENCE_PATH is required", file=sys.stderr)
+        return 1
+    raw_ledger = args.ledger or os.environ.get("UMA_MAIL_ACTION_LEDGER_PATH") or _default_action_ledger_path()
+
+    try:
+        plan = build_action_plan_for_ledger(
+            Path(raw_intelligence).expanduser(),
+            max_items=args.max_items,
+        )
+        ledger = build_action_ledger(
+            plan,
+            receipt_path=Path(raw_ledger).expanduser(),
+            max_items=args.max_items,
+            max_receipts=args.max_receipts,
+        )
+    except MailActionLedgerError as e:
+        print(f"mail-action-ledger: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(ledger, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_resolver_ledger(args: argparse.Namespace) -> int:
+    """Emit redacted resolver proof state merged with local receipts."""
+    import json
+
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_resolver_plan import MailResolverPlanError
+    from core.mail_resolver_receipt import MailResolverReceiptError, build_resolver_ledger
+
+    raw_ledger = args.ledger or os.environ.get("UMA_MAIL_RESOLVER_LEDGER_PATH") or _default_resolver_ledger_path()
+    try:
+        resolver_plan = _build_resolver_plan_for_cli(args)
+        ledger = build_resolver_ledger(
+            resolver_plan,
+            receipt_path=Path(raw_ledger).expanduser(),
+            max_items=args.max_items,
+            max_receipts=args.max_receipts,
+        )
+    except ValueError as e:
+        print(f"mail-resolver-ledger: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailResolverPlanError, MailResolverReceiptError) as e:
+        print(f"mail-resolver-ledger: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(ledger, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_github_resolver(args: argparse.Namespace) -> int:
+    """Emit a redacted read-only GitHub official-surface resolver snapshot."""
+    import json
+
+    from core.github_resolver import GitHubResolverError, build_github_resolver_snapshot
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_resolver_plan import MailResolverPlanError
+
+    try:
+        resolver_plan = _build_resolver_plan_for_cli(args)
+        snapshot = build_github_resolver_snapshot(
+            resolver_plan,
+            gh_bin=args.gh_bin,
+            query_limit=args.query_limit,
+            max_items=args.max_items,
+            include_provider_queries=not args.skip_provider_queries,
+        )
+    except ValueError as e:
+        print(f"mail-github-resolver: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailResolverPlanError, GitHubResolverError) as e:
+        print(f"mail-github-resolver: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(snapshot, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_github_resolver_receipts(args: argparse.Namespace) -> int:
+    """Record redacted resolver receipts from a GitHub resolver snapshot."""
+    import json
+
+    from core.github_resolver import (
+        GitHubResolverError,
+        build_github_resolver_receipts,
+        build_github_resolver_snapshot,
+    )
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_resolver_plan import MailResolverPlanError
+    from core.mail_resolver_receipt import MailResolverReceiptError
+
+    raw_ledger = args.ledger or os.environ.get("UMA_MAIL_RESOLVER_LEDGER_PATH") or _default_resolver_ledger_path()
+    try:
+        resolver_plan = _build_resolver_plan_for_cli(args)
+        snapshot = build_github_resolver_snapshot(
+            resolver_plan,
+            gh_bin=args.gh_bin,
+            query_limit=args.query_limit,
+            max_items=args.max_items,
+            include_provider_queries=not args.skip_provider_queries,
+        )
+        receipts = build_github_resolver_receipts(
+            snapshot,
+            resolver_plan,
+            receipt_path=Path(raw_ledger).expanduser(),
+            max_receipts=args.max_receipts,
+        )
+    except ValueError as e:
+        print(f"mail-github-resolver-receipts: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailResolverPlanError, GitHubResolverError, MailResolverReceiptError) as e:
+        print(f"mail-github-resolver-receipts: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(receipts, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_followup_resolver(args: argparse.Namespace) -> int:
+    """Emit a redacted mail/LinkedIn follow-up resolver snapshot."""
+    import json
+
+    from core.followup_resolver import FollowupResolverError, build_followup_resolver_snapshot
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_resolver_plan import MailResolverPlanError
+
+    raw_approvals = (
+        args.draft_approvals
+        or os.environ.get("UMA_MAIL_DRAFT_APPROVAL_PATH")
+        or _default_draft_approval_path()
+    )
+    raw_delivery = args.delivery_ledger or os.environ.get("UMA_MAIL_DELIVERY_LEDGER_PATH") or _default_delivery_ledger_path()
+    try:
+        resolver_plan = _build_resolver_plan_for_cli(args)
+        snapshot = build_followup_resolver_snapshot(
+            resolver_plan,
+            draft_approval_receipt_path=Path(raw_approvals).expanduser(),
+            delivery_receipt_path=Path(raw_delivery).expanduser(),
+            max_items=args.max_items,
+        )
+    except ValueError as e:
+        print(f"mail-followup-resolver: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailResolverPlanError, FollowupResolverError) as e:
+        print(f"mail-followup-resolver: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(snapshot, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_followup_resolver_receipts(args: argparse.Namespace) -> int:
+    """Record redacted resolver receipts from mail/LinkedIn follow-up proof."""
+    import json
+
+    from core.followup_resolver import (
+        FollowupResolverError,
+        build_followup_resolver_receipts,
+        build_followup_resolver_snapshot,
+    )
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_resolver_plan import MailResolverPlanError
+    from core.mail_resolver_receipt import MailResolverReceiptError
+
+    raw_approvals = (
+        args.draft_approvals
+        or os.environ.get("UMA_MAIL_DRAFT_APPROVAL_PATH")
+        or _default_draft_approval_path()
+    )
+    raw_delivery = args.delivery_ledger or os.environ.get("UMA_MAIL_DELIVERY_LEDGER_PATH") or _default_delivery_ledger_path()
+    raw_ledger = args.ledger or os.environ.get("UMA_MAIL_RESOLVER_LEDGER_PATH") or _default_resolver_ledger_path()
+    try:
+        resolver_plan = _build_resolver_plan_for_cli(args)
+        snapshot = build_followup_resolver_snapshot(
+            resolver_plan,
+            draft_approval_receipt_path=Path(raw_approvals).expanduser(),
+            delivery_receipt_path=Path(raw_delivery).expanduser(),
+            max_items=args.max_items,
+        )
+        receipts = build_followup_resolver_receipts(
+            snapshot,
+            resolver_plan,
+            receipt_path=Path(raw_ledger).expanduser(),
+            max_receipts=args.max_receipts,
+        )
+    except ValueError as e:
+        print(f"mail-followup-resolver-receipts: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailResolverPlanError, FollowupResolverError, MailResolverReceiptError) as e:
+        print(f"mail-followup-resolver-receipts: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(receipts, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_external_resolver(args: argparse.Namespace) -> int:
+    """Emit a redacted external-surface resolver snapshot."""
+    import json
+
+    from core.external_resolver import ExternalResolverError, build_external_resolver_snapshot
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_resolver_plan import MailResolverPlanError
+
+    raw_ledger = args.ledger or os.environ.get("UMA_MAIL_RESOLVER_LEDGER_PATH") or _default_resolver_ledger_path()
+    try:
+        resolver_plan = _build_resolver_plan_for_cli(args)
+        snapshot = build_external_resolver_snapshot(
+            resolver_plan,
+            receipt_path=Path(raw_ledger).expanduser(),
+            max_items=args.max_items,
+            operator_attestation_requested=False,
+        )
+    except ValueError as e:
+        print(f"mail-external-resolver: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailResolverPlanError, ExternalResolverError) as e:
+        print(f"mail-external-resolver: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(snapshot, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_external_resolver_receipts(args: argparse.Namespace) -> int:
+    """Record redacted resolver receipts from explicit external-lane attestations."""
+    import json
+
+    from core.external_resolver import (
+        ExternalResolverError,
+        build_external_resolver_receipts,
+        build_external_resolver_snapshot,
+    )
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_resolver_plan import MailResolverPlanError
+    from core.mail_resolver_receipt import MailResolverReceiptError
+
+    raw_ledger = args.ledger or os.environ.get("UMA_MAIL_RESOLVER_LEDGER_PATH") or _default_resolver_ledger_path()
+    try:
+        resolver_plan = _build_resolver_plan_for_cli(args)
+        snapshot = build_external_resolver_snapshot(
+            resolver_plan,
+            receipt_path=Path(raw_ledger).expanduser(),
+            max_items=args.max_items,
+            operator_attestation_requested=args.attest_blockers,
+        )
+        receipts = build_external_resolver_receipts(
+            snapshot,
+            resolver_plan,
+            receipt_path=Path(raw_ledger).expanduser(),
+            max_receipts=args.max_receipts,
+        )
+    except ValueError as e:
+        print(f"mail-external-resolver-receipts: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailResolverPlanError, ExternalResolverError, MailResolverReceiptError) as e:
+        print(f"mail-external-resolver-receipts: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(receipts, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_resolver_receipt(args: argparse.Namespace) -> int:
+    """Append a redacted official-surface resolver receipt."""
+    import json
+
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_resolver_plan import MailResolverPlanError
+    from core.mail_resolver_receipt import MailResolverReceiptError, build_resolver_receipt
+
+    raw_ledger = args.ledger or os.environ.get("UMA_MAIL_RESOLVER_LEDGER_PATH") or _default_resolver_ledger_path()
+    try:
+        resolver_plan = _build_resolver_plan_for_cli(args)
+        receipt = build_resolver_receipt(
+            resolver_plan,
+            action_id=args.action_id,
+            resolver_status=args.resolver_status,
+            reason_code=args.reason_code,
+            proof_type=args.proof_type,
+            provider=args.provider,
+            external_reference=args.external_reference,
+            receipt_path=Path(raw_ledger).expanduser(),
+        )
+    except ValueError as e:
+        print(f"mail-resolver-receipt: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailResolverPlanError, MailResolverReceiptError) as e:
+        print(f"mail-resolver-receipt: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(receipt, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_action_receipt(args: argparse.Namespace) -> int:
+    """Append a redacted local receipt for an action-plan item."""
+    import json
+
+    from core.mail_action_ledger import (
+        MailActionLedgerError,
+        build_action_plan_for_ledger,
+        build_action_receipt,
+    )
+
+    raw_intelligence = args.intelligence or os.environ.get("UMA_HISTORICAL_INTELLIGENCE_PATH")
+    if not raw_intelligence:
+        print("mail-action-receipt: --intelligence or UMA_HISTORICAL_INTELLIGENCE_PATH is required", file=sys.stderr)
+        return 1
+    raw_ledger = args.ledger or os.environ.get("UMA_MAIL_ACTION_LEDGER_PATH") or _default_action_ledger_path()
+
+    try:
+        plan = build_action_plan_for_ledger(
+            Path(raw_intelligence).expanduser(),
+            max_items=args.max_items,
+        )
+        receipt = build_action_receipt(
+            plan,
+            action_id=args.action_id,
+            action_status=args.action_status,
+            reason_code=args.reason_code,
+            evidence_ids=args.evidence_id or [],
+            receipt_path=Path(raw_ledger).expanduser(),
+        )
+    except MailActionLedgerError as e:
+        print(f"mail-action-receipt: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(receipt, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_evidence_review(args: argparse.Namespace) -> int:
+    """Open a gated private source message for a redacted evidence id."""
+    import json
+
+    from core.mail_evidence_review import MailEvidenceReviewError, build_evidence_review
+
+    raw_history = args.history or os.environ.get("UMA_HISTORICAL_MAIL_PATH")
+    if not raw_history:
+        print("mail-evidence-review: --history or UMA_HISTORICAL_MAIL_PATH is required", file=sys.stderr)
+        return 1
+
+    try:
+        review = build_evidence_review(
+            Path(raw_history).expanduser(),
+            args.evidence_id,
+            ack_private=args.ack_private,
+            body_char_limit=args.body_char_limit,
+            context_limit=args.context_limit,
+        )
+    except MailEvidenceReviewError as e:
+        print(f"mail-evidence-review: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(review, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_draft_package(args: argparse.Namespace) -> int:
+    """Build private approval-gated draft candidates for an action id."""
+    import json
+
+    from core.mail_action_ledger import MailActionLedgerError, build_action_plan_for_ledger
+    from core.mail_draft_package import MailDraftPackageError, build_draft_package
+
+    raw_intelligence = args.intelligence or os.environ.get("UMA_HISTORICAL_INTELLIGENCE_PATH")
+    if not raw_intelligence:
+        print("mail-draft-package: --intelligence or UMA_HISTORICAL_INTELLIGENCE_PATH is required", file=sys.stderr)
+        return 1
+    raw_history = args.history or os.environ.get("UMA_HISTORICAL_MAIL_PATH")
+    if not raw_history:
+        print("mail-draft-package: --history or UMA_HISTORICAL_MAIL_PATH is required", file=sys.stderr)
+        return 1
+
+    try:
+        plan = build_action_plan_for_ledger(
+            Path(raw_intelligence).expanduser(),
+            max_items=args.max_items,
+        )
+        package = build_draft_package(
+            plan,
+            Path(raw_history).expanduser(),
+            args.action_id,
+            ack_private=args.ack_private,
+            user_name=args.user_name,
+            max_drafts=args.max_drafts,
+            body_char_limit=args.body_char_limit,
+        )
+    except (MailActionLedgerError, MailDraftPackageError) as e:
+        print(f"mail-draft-package: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(package, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def _build_private_draft_package_for_cli(args: argparse.Namespace) -> dict:
+    from core.mail_action_ledger import build_action_plan_for_ledger
+    from core.mail_draft_package import build_draft_package
+
+    raw_intelligence = args.intelligence or os.environ.get("UMA_HISTORICAL_INTELLIGENCE_PATH")
+    if not raw_intelligence:
+        raise ValueError("--intelligence or UMA_HISTORICAL_INTELLIGENCE_PATH is required")
+    raw_history = args.history or os.environ.get("UMA_HISTORICAL_MAIL_PATH")
+    if not raw_history:
+        raise ValueError("--history or UMA_HISTORICAL_MAIL_PATH is required")
+
+    plan = build_action_plan_for_ledger(
+        Path(raw_intelligence).expanduser(),
+        max_items=args.max_items,
+    )
+    return build_draft_package(
+        plan,
+        Path(raw_history).expanduser(),
+        args.action_id,
+        ack_private=args.ack_private,
+        user_name=args.user_name,
+        max_drafts=args.max_drafts,
+        body_char_limit=args.body_char_limit,
+    )
+
+
+def cmd_mail_draft_approvals(args: argparse.Namespace) -> int:
+    """Emit redacted approval status for private draft candidates."""
+    import json
+
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_draft_package import MailDraftPackageError
+    from core.mail_draft_approval import MailDraftApprovalError, build_draft_approval_ledger
+
+    raw_approvals = (
+        args.approvals
+        or os.environ.get("UMA_MAIL_DRAFT_APPROVAL_PATH")
+        or _default_draft_approval_path()
+    )
+    try:
+        package = _build_private_draft_package_for_cli(args)
+        ledger = build_draft_approval_ledger(
+            package,
+            receipt_path=Path(raw_approvals).expanduser(),
+            max_items=args.max_items,
+            max_receipts=args.max_receipts,
+        )
+    except ValueError as e:
+        print(f"mail-draft-approvals: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailDraftPackageError, MailDraftApprovalError) as e:
+        print(f"mail-draft-approvals: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(ledger, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_draft_approval_receipt(args: argparse.Namespace) -> int:
+    """Append a redacted local approval receipt for a draft candidate."""
+    import json
+
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_draft_package import MailDraftPackageError
+    from core.mail_draft_approval import MailDraftApprovalError, build_draft_approval_receipt
+
+    raw_approvals = (
+        args.approvals
+        or os.environ.get("UMA_MAIL_DRAFT_APPROVAL_PATH")
+        or _default_draft_approval_path()
+    )
+    try:
+        package = _build_private_draft_package_for_cli(args)
+        receipt = build_draft_approval_receipt(
+            package,
+            draft_id=args.draft_id,
+            decision=args.decision,
+            reason_code=args.reason_code,
+            ack_private=args.ack_private,
+            receipt_path=Path(raw_approvals).expanduser(),
+        )
+    except ValueError as e:
+        print(f"mail-draft-approval: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailDraftPackageError, MailDraftApprovalError) as e:
+        print(f"mail-draft-approval: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(receipt, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_delivery_ledger(args: argparse.Namespace) -> int:
+    """Emit redacted delivery intent/status for approved draft candidates."""
+    import json
+
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_draft_approval import MailDraftApprovalError
+    from core.mail_draft_package import MailDraftPackageError
+    from core.mail_delivery import MailDeliveryError, build_delivery_ledger
+
+    raw_approvals = (
+        args.approvals
+        or os.environ.get("UMA_MAIL_DRAFT_APPROVAL_PATH")
+        or _default_draft_approval_path()
+    )
+    raw_delivery = (
+        args.delivery
+        or os.environ.get("UMA_MAIL_DELIVERY_LEDGER_PATH")
+        or _default_delivery_ledger_path()
+    )
+    try:
+        package = _build_private_draft_package_for_cli(args)
+        ledger = build_delivery_ledger(
+            package,
+            approval_receipt_path=Path(raw_approvals).expanduser(),
+            delivery_receipt_path=Path(raw_delivery).expanduser(),
+            max_items=args.max_items,
+            max_receipts=args.max_receipts,
+        )
+    except ValueError as e:
+        print(f"mail-delivery-ledger: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailDraftPackageError, MailDraftApprovalError, MailDeliveryError) as e:
+        print(f"mail-delivery-ledger: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(ledger, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
+def cmd_mail_delivery_receipt(args: argparse.Namespace) -> int:
+    """Append a redacted local delivery receipt for an approved draft candidate."""
+    import json
+
+    from core.mail_action_ledger import MailActionLedgerError
+    from core.mail_draft_approval import MailDraftApprovalError
+    from core.mail_draft_package import MailDraftPackageError
+    from core.mail_delivery import MailDeliveryError, build_delivery_receipt
+
+    raw_approvals = (
+        args.approvals
+        or os.environ.get("UMA_MAIL_DRAFT_APPROVAL_PATH")
+        or _default_draft_approval_path()
+    )
+    raw_delivery = (
+        args.delivery
+        or os.environ.get("UMA_MAIL_DELIVERY_LEDGER_PATH")
+        or _default_delivery_ledger_path()
+    )
+    try:
+        package = _build_private_draft_package_for_cli(args)
+        receipt = build_delivery_receipt(
+            package,
+            draft_id=args.draft_id,
+            delivery_status=args.delivery_status,
+            reason_code=args.reason_code,
+            provider=args.provider,
+            external_reference=args.external_reference,
+            ack_private=args.ack_private,
+            approval_receipt_path=Path(raw_approvals).expanduser(),
+            receipt_path=Path(raw_delivery).expanduser(),
+        )
+    except ValueError as e:
+        print(f"mail-delivery-receipt: {e}", file=sys.stderr)
+        return 1
+    except (MailActionLedgerError, MailDraftPackageError, MailDraftApprovalError, MailDeliveryError) as e:
+        print(f"mail-delivery-receipt: {e.detail}", file=sys.stderr)
+        return 1
+
+    indent = 2 if args.pretty else None
+    print(json.dumps(receipt, indent=indent, sort_keys=args.sort_keys))
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -1022,6 +2006,27 @@ Examples:
   %(prog)s report --provider gmail
   %(prog)s health --provider gmail
   %(prog)s triage --provider gmail --top 20 --draft --name "Anthony"
+  %(prog)s ops-summary --report ~/System/Reports/mail-triage/latest.json
+  %(prog)s ops-refresh --report ~/System/Reports/mail-triage/latest.json
+  %(prog)s mail-history-export --source ~/Library/Mail --since 2024-01-01 --until 2026-06-16
+  %(prog)s mail-intel --history ~/System/Reports/mail-history/latest.json --ops-report ~/System/Reports/mail-triage/latest.json
+  %(prog)s mail-action-plan --intelligence ~/System/Reports/mail-history/latest-intelligence.json
+  %(prog)s mail-resolver-plan --intelligence ~/System/Reports/mail-history/latest-intelligence.json
+  %(prog)s mail-provider-surface-plan --intelligence ~/System/Reports/mail-history/latest-intelligence.json
+  %(prog)s mail-resolver-ledger --intelligence ~/System/Reports/mail-history/latest-intelligence.json
+  %(prog)s mail-github-resolver --intelligence ~/System/Reports/mail-history/latest-intelligence.json
+  %(prog)s mail-github-resolver-receipts --intelligence ~/System/Reports/mail-history/latest-intelligence.json --ledger ~/.local/state/universal-mail-automation/mail-resolver-ledger.jsonl
+  %(prog)s mail-followup-resolver --intelligence ~/System/Reports/mail-history/latest-intelligence.json
+  %(prog)s mail-followup-resolver-receipts --intelligence ~/System/Reports/mail-history/latest-intelligence.json --ledger ~/.local/state/universal-mail-automation/mail-resolver-ledger.jsonl
+  %(prog)s mail-external-resolver --intelligence ~/System/Reports/mail-history/latest-intelligence.json
+  %(prog)s mail-external-resolver-receipts --intelligence ~/System/Reports/mail-history/latest-intelligence.json --attest-blockers
+  %(prog)s mail-resolver-receipt --intelligence ~/System/Reports/mail-history/latest-intelligence.json --action-id action_... --resolver-status verified_resolved --reason-code github_reconciled --proof-type github_issue_pr_billing_or_security_state --provider github
+  %(prog)s mail-action-ledger --intelligence ~/System/Reports/mail-history/latest-intelligence.json
+  %(prog)s mail-action-receipt --intelligence ~/System/Reports/mail-history/latest-intelligence.json --action-id action_... --status waiting --reason-code awaiting_reply
+  %(prog)s mail-evidence-review --history ~/System/Reports/mail-history/latest.json --evidence-id ev_... --ack-private
+  %(prog)s mail-draft-package --intelligence ~/System/Reports/mail-history/latest-intelligence.json --history ~/System/Reports/mail-history/latest.json --action-id action_... --ack-private
+  %(prog)s mail-draft-approval --intelligence ~/System/Reports/mail-history/latest-intelligence.json --history ~/System/Reports/mail-history/latest.json --action-id action_... --draft-id draft_... --decision approved --reason-code ready_to_send --ack-private
+  %(prog)s mail-delivery-receipt --intelligence ~/System/Reports/mail-history/latest-intelligence.json --history ~/System/Reports/mail-history/latest.json --action-id action_... --draft-id draft_... --delivery-status provider_draft_requested --reason-code approved_for_provider_draft --ack-private
         """,
     )
 
@@ -1030,6 +2035,11 @@ Examples:
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose logging",
+    )
+    parser.add_argument(
+        "--intake-json",
+        action="store_true",
+        help="Also emit UMA intake packet JSON for machine consumption",
     )
 
     # Provider options (shared across subcommands)
@@ -1299,6 +2309,1073 @@ Examples:
         help="User's name for the draft signature",
     )
     triage_parser.set_defaults(func=cmd_triage)
+
+    # Operator summary command - local report to canonical dashboard payload.
+    ops_parser = subparsers.add_parser(
+        "ops-summary",
+        help="Emit the redacted UMA operator summary JSON",
+    )
+    ops_parser.add_argument(
+        "--report",
+        help="Path to latest.json (defaults to UMA_OPS_REPORT_PATH)",
+    )
+    ops_parser.add_argument(
+        "--max-age-hours",
+        type=float,
+        default=None,
+        help="Freshness threshold for the report (default: 12)",
+    )
+    ops_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    ops_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    ops_parser.set_defaults(func=cmd_ops_summary)
+
+    # Operator refresh command - persist redacted summary and history.
+    ops_refresh_parser = subparsers.add_parser(
+        "ops-refresh",
+        help="Persist the redacted UMA operator summary and history",
+    )
+    ops_refresh_parser.add_argument(
+        "--report",
+        help="Path to latest.json (defaults to UMA_OPS_REPORT_PATH)",
+    )
+    ops_refresh_parser.add_argument(
+        "--run-mail-triage",
+        action="store_true",
+        help="Run the local read-only mail-triage producer before summarizing",
+    )
+    ops_refresh_parser.add_argument(
+        "--mail-triage-bin",
+        help="Path to mail-triage producer (defaults to UMA_MAIL_TRIAGE_BIN or user-local bin)",
+    )
+    ops_refresh_parser.add_argument(
+        "--since",
+        help="Inclusive YYYY-MM-DD passed to mail-triage when --run-mail-triage is set",
+    )
+    ops_refresh_parser.add_argument(
+        "--until",
+        help="Exclusive YYYY-MM-DD passed to mail-triage when --run-mail-triage is set",
+    )
+    ops_refresh_parser.add_argument(
+        "--report-dir",
+        help="Report directory passed to mail-triage and used for latest.json discovery",
+    )
+    ops_refresh_parser.add_argument(
+        "--mail-index",
+        help="Optional Apple Mail Envelope Index path passed to mail-triage",
+    )
+    ops_refresh_parser.add_argument(
+        "--output-dir",
+        help="Output directory for latest-summary.json and history "
+             "(defaults to UMA_OPS_HISTORY_DIR or user-local state)",
+    )
+    ops_refresh_parser.add_argument(
+        "--history-limit",
+        type=int,
+        default=100,
+        help="Maximum history entries to keep in index.json (default: 100)",
+    )
+    ops_refresh_parser.add_argument(
+        "--max-age-hours",
+        type=float,
+        default=None,
+        help="Freshness threshold for the report (default: 12)",
+    )
+    ops_refresh_parser.add_argument(
+        "--require-fresh",
+        action="store_true",
+        help="Exit 2 after writing if the report is stale",
+    )
+    ops_refresh_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    ops_refresh_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    ops_refresh_parser.set_defaults(func=cmd_ops_refresh)
+
+    # Historical intelligence command - read-only past-mail mining.
+    mail_intel_parser = subparsers.add_parser(
+        "mail-intel",
+        help="Emit redacted historical mail intelligence and ops reconciliation",
+    )
+    mail_intel_parser.add_argument(
+        "--history",
+        help="Path to historical mail export JSON (defaults to UMA_HISTORICAL_MAIL_PATH)",
+    )
+    mail_intel_parser.add_argument(
+        "--ops-report",
+        help="Optional latest.json ops report used to reconcile current lane visibility "
+             "(defaults to UMA_OPS_REPORT_PATH)",
+    )
+    mail_intel_parser.add_argument(
+        "--stale-days",
+        type=int,
+        default=14,
+        help="Minimum age for stale missed-lead candidates (default: 14)",
+    )
+    mail_intel_parser.add_argument(
+        "--output",
+        help="Optional redacted intelligence output file; stdout becomes a safe receipt",
+    )
+    mail_intel_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_intel_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_intel_parser.set_defaults(func=cmd_mail_intel)
+
+    # Historical export command - private raw-ish input for mail-intel.
+    mail_history_export_parser = subparsers.add_parser(
+        "mail-history-export",
+        help="Write a private normalized historical mail export and print a safe receipt",
+    )
+    mail_history_export_parser.add_argument(
+        "--source",
+        help="Source file or directory (defaults to UMA_HISTORICAL_MAIL_SOURCE)",
+    )
+    mail_history_export_parser.add_argument(
+        "--output",
+        help="Private export path (defaults to UMA_HISTORICAL_MAIL_PATH or ~/System/Reports/mail-history/latest.json)",
+    )
+    mail_history_export_parser.add_argument(
+        "--source-type",
+        choices=["auto", "json", "jsonl", "mbox", "eml", "emlx", "emlx_dir"],
+        default="auto",
+        help="Source parser to use (default: auto)",
+    )
+    mail_history_export_parser.add_argument(
+        "--since",
+        help="Inclusive lower bound for received_at/date filtering, e.g. 2024-01-01",
+    )
+    mail_history_export_parser.add_argument(
+        "--until",
+        help="Exclusive upper bound for received_at/date filtering, e.g. 2026-06-16",
+    )
+    mail_history_export_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum messages to write after date filtering",
+    )
+    mail_history_export_parser.add_argument(
+        "--body-char-limit",
+        type=int,
+        default=4000,
+        help="Maximum text/plain body characters copied per message (default: 4000)",
+    )
+    mail_history_export_parser.add_argument(
+        "--mailbox-hint",
+        help="Optional scope override such as Inbox, Archive, Sent, or All Mail",
+    )
+    mail_history_export_parser.add_argument(
+        "--self-address",
+        action="append",
+        default=[],
+        help="Address treated as outbound; may be repeated",
+    )
+    mail_history_export_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print the receipt JSON",
+    )
+    mail_history_export_parser.add_argument(
+        "--pretty-export",
+        action="store_true",
+        help="Pretty-print the private export file",
+    )
+    mail_history_export_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_history_export_parser.set_defaults(func=cmd_mail_history_export)
+
+    # Action plan command - redacted next-action reducer over intelligence.
+    mail_action_plan_parser = subparsers.add_parser(
+        "mail-action-plan",
+        help="Emit a redacted, approval-aware action plan from historical intelligence",
+    )
+    mail_action_plan_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_action_plan_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=40,
+        help="Maximum action groups to include (default: 40)",
+    )
+    mail_action_plan_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_action_plan_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_action_plan_parser.set_defaults(func=cmd_mail_action_plan)
+
+    # Resolver plan command - lane-specific official surface reducer.
+    mail_resolver_plan_parser = subparsers.add_parser(
+        "mail-resolver-plan",
+        help="Emit redacted lane-specific resolver plans from historical intelligence",
+    )
+    mail_resolver_plan_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_resolver_plan_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum resolver groups to include (default: 100)",
+    )
+    mail_resolver_plan_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_resolver_plan_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_resolver_plan_parser.set_defaults(func=cmd_mail_resolver_plan)
+
+    # Provider-surface plan command - next official provider/API resolver frontier.
+    mail_provider_surface_plan_parser = subparsers.add_parser(
+        "mail-provider-surface-plan",
+        help="Emit a redacted provider-surface resolver frontier plan",
+    )
+    mail_provider_surface_plan_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_provider_surface_plan_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=20,
+        help="Maximum provider surfaces to include (default: 20)",
+    )
+    mail_provider_surface_plan_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_provider_surface_plan_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_provider_surface_plan_parser.set_defaults(func=cmd_mail_provider_surface_plan)
+
+    # Resolver ledger command - redacted official-surface proof state.
+    mail_resolver_ledger_parser = subparsers.add_parser(
+        "mail-resolver-ledger",
+        help="Emit redacted resolver proof state merged with local receipts",
+    )
+    mail_resolver_ledger_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_resolver_ledger_parser.add_argument(
+        "--ledger",
+        help="Path to JSONL resolver receipt ledger (defaults to UMA_MAIL_RESOLVER_LEDGER_PATH or user-local state)",
+    )
+    mail_resolver_ledger_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum resolver groups to include (default: 100)",
+    )
+    mail_resolver_ledger_parser.add_argument(
+        "--max-receipts",
+        type=int,
+        default=40,
+        help="Maximum recent receipts to include (default: 40)",
+    )
+    mail_resolver_ledger_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_resolver_ledger_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_resolver_ledger_parser.set_defaults(func=cmd_mail_resolver_ledger)
+
+    # GitHub resolver command - read-only official-surface snapshot.
+    mail_github_resolver_parser = subparsers.add_parser(
+        "mail-github-resolver",
+        help="Emit a redacted read-only GitHub official-surface resolver snapshot",
+    )
+    mail_github_resolver_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_github_resolver_parser.add_argument(
+        "--gh-bin",
+        default="gh",
+        help="GitHub CLI executable to use for read-only official-surface checks (default: gh)",
+    )
+    mail_github_resolver_parser.add_argument(
+        "--query-limit",
+        type=int,
+        default=50,
+        help="Bounded per-surface GitHub query limit (default: 50)",
+    )
+    mail_github_resolver_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum GitHub resolver action groups to include (default: 100)",
+    )
+    mail_github_resolver_parser.add_argument(
+        "--skip-provider-queries",
+        action="store_true",
+        help="Build only the planned GitHub resolver mapping without calling gh",
+    )
+    mail_github_resolver_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_github_resolver_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_github_resolver_parser.set_defaults(func=cmd_mail_github_resolver)
+
+    # GitHub resolver receipts command - local proof from read-only snapshot.
+    mail_github_receipts_parser = subparsers.add_parser(
+        "mail-github-resolver-receipts",
+        help="Record redacted resolver receipts from a GitHub resolver snapshot",
+    )
+    mail_github_receipts_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_github_receipts_parser.add_argument(
+        "--ledger",
+        help="Path to JSONL resolver receipt ledger (defaults to UMA_MAIL_RESOLVER_LEDGER_PATH or user-local state)",
+    )
+    mail_github_receipts_parser.add_argument(
+        "--gh-bin",
+        default="gh",
+        help="GitHub CLI executable to use for read-only official-surface checks (default: gh)",
+    )
+    mail_github_receipts_parser.add_argument(
+        "--query-limit",
+        type=int,
+        default=50,
+        help="Bounded per-surface GitHub query limit (default: 50)",
+    )
+    mail_github_receipts_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum GitHub resolver action groups to include (default: 100)",
+    )
+    mail_github_receipts_parser.add_argument(
+        "--max-receipts",
+        type=int,
+        default=100,
+        help="Maximum receipt candidates to record (default: 100)",
+    )
+    mail_github_receipts_parser.add_argument(
+        "--skip-provider-queries",
+        action="store_true",
+        help="Build only the planned GitHub resolver mapping without calling gh; records no receipts",
+    )
+    mail_github_receipts_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_github_receipts_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_github_receipts_parser.set_defaults(func=cmd_mail_github_resolver_receipts)
+
+    # Follow-up resolver command - read-only mail/LinkedIn follow-up snapshot.
+    mail_followup_resolver_parser = subparsers.add_parser(
+        "mail-followup-resolver",
+        help="Emit a redacted mail/LinkedIn follow-up resolver snapshot",
+    )
+    mail_followup_resolver_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_followup_resolver_parser.add_argument(
+        "--draft-approvals",
+        help="Path to JSONL draft approval receipts (defaults to UMA_MAIL_DRAFT_APPROVAL_PATH or user-local state)",
+    )
+    mail_followup_resolver_parser.add_argument(
+        "--delivery-ledger",
+        help="Path to JSONL delivery receipts (defaults to UMA_MAIL_DELIVERY_LEDGER_PATH or user-local state)",
+    )
+    mail_followup_resolver_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum follow-up resolver action groups to include (default: 100)",
+    )
+    mail_followup_resolver_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_followup_resolver_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_followup_resolver_parser.set_defaults(func=cmd_mail_followup_resolver)
+
+    # Follow-up resolver receipts command - local proof from approval/delivery receipts.
+    mail_followup_receipts_parser = subparsers.add_parser(
+        "mail-followup-resolver-receipts",
+        help="Record resolver receipts from mail/LinkedIn follow-up proof",
+    )
+    mail_followup_receipts_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_followup_receipts_parser.add_argument(
+        "--ledger",
+        help="Path to JSONL resolver receipt ledger (defaults to UMA_MAIL_RESOLVER_LEDGER_PATH or user-local state)",
+    )
+    mail_followup_receipts_parser.add_argument(
+        "--draft-approvals",
+        help="Path to JSONL draft approval receipts (defaults to UMA_MAIL_DRAFT_APPROVAL_PATH or user-local state)",
+    )
+    mail_followup_receipts_parser.add_argument(
+        "--delivery-ledger",
+        help="Path to JSONL delivery receipts (defaults to UMA_MAIL_DELIVERY_LEDGER_PATH or user-local state)",
+    )
+    mail_followup_receipts_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum follow-up resolver action groups to include (default: 100)",
+    )
+    mail_followup_receipts_parser.add_argument(
+        "--max-receipts",
+        type=int,
+        default=100,
+        help="Maximum receipt candidates to record (default: 100)",
+    )
+    mail_followup_receipts_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_followup_receipts_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_followup_receipts_parser.set_defaults(func=cmd_mail_followup_resolver_receipts)
+
+    # External resolver command - read-only official-surface lane snapshot.
+    mail_external_resolver_parser = subparsers.add_parser(
+        "mail-external-resolver",
+        help="Emit a redacted external-surface resolver snapshot",
+    )
+    mail_external_resolver_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_external_resolver_parser.add_argument(
+        "--ledger",
+        help="Path to JSONL resolver receipt ledger (defaults to UMA_MAIL_RESOLVER_LEDGER_PATH or user-local state)",
+    )
+    mail_external_resolver_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum external resolver action groups to include (default: 100)",
+    )
+    mail_external_resolver_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_external_resolver_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_external_resolver_parser.set_defaults(func=cmd_mail_external_resolver)
+
+    # External resolver receipts command - explicit local blocker attestations.
+    mail_external_receipts_parser = subparsers.add_parser(
+        "mail-external-resolver-receipts",
+        help="Record resolver receipts from explicit external-surface attestations",
+    )
+    mail_external_receipts_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_external_receipts_parser.add_argument(
+        "--ledger",
+        help="Path to JSONL resolver receipt ledger (defaults to UMA_MAIL_RESOLVER_LEDGER_PATH or user-local state)",
+    )
+    mail_external_receipts_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum external resolver action groups to include (default: 100)",
+    )
+    mail_external_receipts_parser.add_argument(
+        "--max-receipts",
+        type=int,
+        default=100,
+        help="Maximum receipt candidates to record (default: 100)",
+    )
+    mail_external_receipts_parser.add_argument(
+        "--attest-blockers",
+        action="store_true",
+        help="Explicitly record local blocker attestations for visible external actions",
+    )
+    mail_external_receipts_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_external_receipts_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_external_receipts_parser.set_defaults(func=cmd_mail_external_resolver_receipts)
+
+    # Resolver receipt command - local redacted official-surface receipt.
+    mail_resolver_receipt_parser = subparsers.add_parser(
+        "mail-resolver-receipt",
+        help="Append a redacted official-surface resolver receipt",
+    )
+    mail_resolver_receipt_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_resolver_receipt_parser.add_argument(
+        "--ledger",
+        help="Path to JSONL resolver receipt ledger (defaults to UMA_MAIL_RESOLVER_LEDGER_PATH or user-local state)",
+    )
+    mail_resolver_receipt_parser.add_argument("--action-id", required=True, help="Action id from the resolver plan")
+    mail_resolver_receipt_parser.add_argument(
+        "--resolver-status",
+        required=True,
+        choices=[
+            "verified_waiting",
+            "verified_blocked",
+            "verified_resolved",
+            "needs_follow_up",
+            "not_found",
+            "not_applicable",
+        ],
+        help="Resolver status to record",
+    )
+    mail_resolver_receipt_parser.add_argument(
+        "--reason-code",
+        required=True,
+        choices=[
+            "official_surface_checked",
+            "external_state_matches_mail",
+            "external_state_differs",
+            "awaiting_provider",
+            "awaiting_reply",
+            "legal_review_complete",
+            "billing_verified",
+            "security_reviewed",
+            "github_reconciled",
+            "subscription_decision_recorded",
+            "blocked_no_auth",
+            "blocked_provider_unavailable",
+            "duplicate",
+            "not_actionable",
+        ],
+        help="Redacted reason code for the resolver status",
+    )
+    mail_resolver_receipt_parser.add_argument(
+        "--proof-type",
+        required=True,
+        choices=[
+            "action_receipt",
+            "delivery_receipt",
+            "draft_approval_receipt",
+            "future_provider_send_receipt",
+            "future_send_receipt_if_reply_needed",
+            "github_issue_pr_billing_or_security_state",
+            "legal_review_receipt",
+            "manual_review_receipt",
+            "official_payment_or_invoice_verification",
+            "official_provider_status",
+            "official_provider_verification",
+            "official_subscription_status",
+            "operator_decision",
+        ],
+        help="Proof type required by the current resolver plan",
+    )
+    mail_resolver_receipt_parser.add_argument(
+        "--provider",
+        default="manual",
+        help="Redacted provider label, e.g. github, gmail, cloudflare, bank",
+    )
+    mail_resolver_receipt_parser.add_argument(
+        "--external-reference",
+        help="Optional external reference; only a hash is stored",
+    )
+    mail_resolver_receipt_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum resolver groups to load while validating action id (default: 100)",
+    )
+    mail_resolver_receipt_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_resolver_receipt_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_resolver_receipt_parser.set_defaults(func=cmd_mail_resolver_receipt)
+
+    # Action ledger command - redacted status/proof over the action plan.
+    mail_action_ledger_parser = subparsers.add_parser(
+        "mail-action-ledger",
+        help="Emit redacted action status merged with local receipts",
+    )
+    mail_action_ledger_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_action_ledger_parser.add_argument(
+        "--ledger",
+        help="Path to JSONL receipt ledger (defaults to UMA_MAIL_ACTION_LEDGER_PATH or user-local state)",
+    )
+    mail_action_ledger_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum action groups to include (default: 100)",
+    )
+    mail_action_ledger_parser.add_argument(
+        "--max-receipts",
+        type=int,
+        default=40,
+        help="Maximum recent receipts to include (default: 40)",
+    )
+    mail_action_ledger_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_action_ledger_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_action_ledger_parser.set_defaults(func=cmd_mail_action_ledger)
+
+    # Action receipt command - append a local proof receipt.
+    mail_action_receipt_parser = subparsers.add_parser(
+        "mail-action-receipt",
+        help="Append a redacted local receipt for an action-plan item",
+    )
+    mail_action_receipt_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_action_receipt_parser.add_argument(
+        "--ledger",
+        help="Path to JSONL receipt ledger (defaults to UMA_MAIL_ACTION_LEDGER_PATH or user-local state)",
+    )
+    mail_action_receipt_parser.add_argument(
+        "--action-id",
+        required=True,
+        help="Redacted action id from uma.mail.action_plan.v1 or uma.mail.action_ledger.v1",
+    )
+    mail_action_receipt_parser.add_argument(
+        "--status",
+        dest="action_status",
+        choices=["open", "reviewing", "waiting", "blocked", "resolved", "ignored"],
+        required=True,
+        help="New local action status",
+    )
+    mail_action_receipt_parser.add_argument(
+        "--reason-code",
+        choices=[
+            "evidence_reviewed",
+            "draft_prepared",
+            "awaiting_reply",
+            "portal_verified",
+            "legal_waiting",
+            "provider_blocked",
+            "needs_human",
+            "not_actionable",
+            "duplicate",
+            "reopened",
+        ],
+        required=True,
+        help="Redacted reason code for the receipt",
+    )
+    mail_action_receipt_parser.add_argument(
+        "--evidence-id",
+        action="append",
+        default=[],
+        help="Optional redacted evidence id included in the receipt; may be repeated",
+    )
+    mail_action_receipt_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum action groups used to validate action id (default: 100)",
+    )
+    mail_action_receipt_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_action_receipt_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_action_receipt_parser.set_defaults(func=cmd_mail_action_receipt)
+
+    # Evidence review command - private raw source lookup.
+    mail_evidence_review_parser = subparsers.add_parser(
+        "mail-evidence-review",
+        help="Open a gated private source message for a redacted evidence id",
+    )
+    mail_evidence_review_parser.add_argument(
+        "--history",
+        help="Path to private historical mail export JSON (defaults to UMA_HISTORICAL_MAIL_PATH)",
+    )
+    mail_evidence_review_parser.add_argument(
+        "--evidence-id",
+        required=True,
+        help="Redacted evidence id from uma.mail.intelligence.v1 or uma.mail.action_plan.v1",
+    )
+    mail_evidence_review_parser.add_argument(
+        "--ack-private",
+        action="store_true",
+        help="Required acknowledgment that stdout will contain private source mail",
+    )
+    mail_evidence_review_parser.add_argument(
+        "--body-char-limit",
+        type=int,
+        default=6000,
+        help="Maximum body characters to include (default: 6000)",
+    )
+    mail_evidence_review_parser.add_argument(
+        "--context-limit",
+        type=int,
+        default=6,
+        help="Maximum same-thread context rows to include (default: 6)",
+    )
+    mail_evidence_review_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_evidence_review_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_evidence_review_parser.set_defaults(func=cmd_mail_evidence_review)
+
+    # Draft package command - private draft candidates from verified evidence.
+    mail_draft_package_parser = subparsers.add_parser(
+        "mail-draft-package",
+        help="Build private approval-gated draft candidates for an action id",
+    )
+    mail_draft_package_parser.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    mail_draft_package_parser.add_argument(
+        "--history",
+        help="Path to private historical mail export JSON (defaults to UMA_HISTORICAL_MAIL_PATH)",
+    )
+    mail_draft_package_parser.add_argument(
+        "--action-id",
+        required=True,
+        help="Redacted draft_approval action id from uma.mail.action_plan.v1",
+    )
+    mail_draft_package_parser.add_argument(
+        "--ack-private",
+        action="store_true",
+        help="Required acknowledgment that stdout will contain private draft content",
+    )
+    mail_draft_package_parser.add_argument(
+        "--user-name",
+        default="Anthony",
+        help="Name used for the draft signature (default: Anthony)",
+    )
+    mail_draft_package_parser.add_argument(
+        "--max-drafts",
+        type=int,
+        default=3,
+        help="Maximum draft candidates to include (default: 3)",
+    )
+    mail_draft_package_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum action groups used to validate action id (default: 100)",
+    )
+    mail_draft_package_parser.add_argument(
+        "--body-char-limit",
+        type=int,
+        default=3000,
+        help="Maximum source body characters inspected per evidence id (default: 3000)",
+    )
+    mail_draft_package_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_draft_package_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_draft_package_parser.set_defaults(func=cmd_mail_draft_package)
+
+    draft_common = argparse.ArgumentParser(add_help=False)
+    draft_common.add_argument(
+        "--intelligence",
+        help="Path to redacted intelligence JSON (defaults to UMA_HISTORICAL_INTELLIGENCE_PATH)",
+    )
+    draft_common.add_argument(
+        "--history",
+        help="Path to private historical mail export JSON (defaults to UMA_HISTORICAL_MAIL_PATH)",
+    )
+    draft_common.add_argument(
+        "--approvals",
+        help="Path to JSONL draft approval receipt ledger (defaults to UMA_MAIL_DRAFT_APPROVAL_PATH or user-local state)",
+    )
+    draft_common.add_argument(
+        "--action-id",
+        required=True,
+        help="Redacted draft_approval action id from uma.mail.action_plan.v1",
+    )
+    draft_common.add_argument(
+        "--ack-private",
+        action="store_true",
+        help="Required acknowledgment that private draft content will be validated",
+    )
+    draft_common.add_argument(
+        "--user-name",
+        default="Anthony",
+        help="Name used for the draft signature (default: Anthony)",
+    )
+    draft_common.add_argument(
+        "--max-drafts",
+        type=int,
+        default=3,
+        help="Maximum draft candidates to build for validation (default: 3)",
+    )
+    draft_common.add_argument(
+        "--max-items",
+        type=int,
+        default=100,
+        help="Maximum action groups used to validate action id (default: 100)",
+    )
+    draft_common.add_argument(
+        "--body-char-limit",
+        type=int,
+        default=3000,
+        help="Maximum source body characters inspected per evidence id (default: 3000)",
+    )
+
+    mail_draft_approvals_parser = subparsers.add_parser(
+        "mail-draft-approvals",
+        parents=[draft_common],
+        help="Emit redacted approval status for private draft candidates",
+    )
+    mail_draft_approvals_parser.add_argument(
+        "--max-receipts",
+        type=int,
+        default=40,
+        help="Maximum recent approval receipts to include (default: 40)",
+    )
+    mail_draft_approvals_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_draft_approvals_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_draft_approvals_parser.set_defaults(func=cmd_mail_draft_approvals)
+
+    mail_draft_approval_parser = subparsers.add_parser(
+        "mail-draft-approval",
+        parents=[draft_common],
+        help="Append a redacted local approval receipt for a draft candidate",
+    )
+    mail_draft_approval_parser.add_argument(
+        "--draft-id",
+        required=True,
+        help="Draft id from uma.mail.draft_package.v1",
+    )
+    mail_draft_approval_parser.add_argument(
+        "--decision",
+        choices=["approved", "rejected", "revise"],
+        required=True,
+        help="Approval decision for the draft candidate",
+    )
+    mail_draft_approval_parser.add_argument(
+        "--reason-code",
+        choices=[
+            "ready_to_send",
+            "needs_edit",
+            "fact_issue",
+            "wrong_recipient",
+            "stale_context",
+            "legal_review",
+            "duplicate",
+            "not_actionable",
+        ],
+        required=True,
+        help="Redacted reason code for the approval decision",
+    )
+    mail_draft_approval_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_draft_approval_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_draft_approval_parser.set_defaults(func=cmd_mail_draft_approval_receipt)
+
+    mail_delivery_ledger_parser = subparsers.add_parser(
+        "mail-delivery-ledger",
+        parents=[draft_common],
+        help="Emit redacted delivery intent/status for approved draft candidates",
+    )
+    mail_delivery_ledger_parser.add_argument(
+        "--delivery",
+        help="Path to JSONL delivery receipt ledger (defaults to UMA_MAIL_DELIVERY_LEDGER_PATH or user-local state)",
+    )
+    mail_delivery_ledger_parser.add_argument(
+        "--max-receipts",
+        type=int,
+        default=40,
+        help="Maximum recent delivery receipts to include (default: 40)",
+    )
+    mail_delivery_ledger_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_delivery_ledger_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_delivery_ledger_parser.set_defaults(func=cmd_mail_delivery_ledger)
+
+    mail_delivery_receipt_parser = subparsers.add_parser(
+        "mail-delivery-receipt",
+        parents=[draft_common],
+        help="Append a redacted local delivery receipt for an approved draft candidate",
+    )
+    mail_delivery_receipt_parser.add_argument(
+        "--delivery",
+        help="Path to JSONL delivery receipt ledger (defaults to UMA_MAIL_DELIVERY_LEDGER_PATH or user-local state)",
+    )
+    mail_delivery_receipt_parser.add_argument(
+        "--draft-id",
+        required=True,
+        help="Draft id from uma.mail.draft_package.v1",
+    )
+    mail_delivery_receipt_parser.add_argument(
+        "--delivery-status",
+        choices=[
+            "provider_draft_requested",
+            "provider_draft_recorded",
+            "send_requested",
+            "sent_recorded",
+            "blocked",
+            "canceled",
+        ],
+        required=True,
+        help="Redacted delivery status to record",
+    )
+    mail_delivery_receipt_parser.add_argument(
+        "--reason-code",
+        choices=[
+            "approved_for_provider_draft",
+            "operator_confirmed_external_draft",
+            "operator_confirmed_external_send",
+            "final_review_required",
+            "provider_unavailable",
+            "portal_required",
+            "not_current",
+            "duplicate",
+            "policy_blocked",
+        ],
+        required=True,
+        help="Redacted reason code for the delivery status",
+    )
+    mail_delivery_receipt_parser.add_argument(
+        "--provider",
+        default="manual",
+        help="Provider/source label, e.g. gmail, mailapp, outlook, imap, or manual",
+    )
+    mail_delivery_receipt_parser.add_argument(
+        "--external-reference",
+        help="Optional provider/reference id; stored only as a hash in the receipt",
+    )
+    mail_delivery_receipt_parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    mail_delivery_receipt_parser.add_argument(
+        "--sort-keys",
+        action="store_true",
+        help="Sort JSON object keys for stable diffing",
+    )
+    mail_delivery_receipt_parser.set_defaults(func=cmd_mail_delivery_receipt)
 
     args = parser.parse_args()
 

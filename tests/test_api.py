@@ -156,6 +156,9 @@ def test_triage_clean_run_summary(monkeypatch):
     assert body["audit"]["archived"] == 1
     assert body["audit"]["violations"] == []
     assert "receipt" in body and body["receipt"]
+    assert body["packet"]["schema"] == "uma.intake.packet.v1"
+    assert body["packet"]["payload"]["request"]["provider"] == "fake"
+    assert body["packet"]["payload"]["result"]["provider"] == "fake"
 
 
 def test_triage_preview_reports_would_archive_for_archivable_message(monkeypatch):

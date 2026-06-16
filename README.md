@@ -21,6 +21,7 @@
 - [The Problem](#the-problem)
 - [Product Overview](#product-overview)
 - [Cloudflare Share Demo](#cloudflare-share-demo)
+- [Operator Dashboard](#operator-dashboard)
 - [Technical Architecture](#technical-architecture)
   - [System Diagram](#system-diagram)
   - [Module Structure](#module-structure)
@@ -40,6 +41,7 @@
   - [Labeling Commands](#labeling-commands)
   - [Reporting Commands](#reporting-commands)
   - [Triage Commands](#triage-commands)
+  - [Operator Summary Command](#operator-summary-command)
   - [Health and Diagnostics](#health-and-diagnostics)
 - [Configuration](#configuration)
   - [Configuration Precedence](#configuration-precedence)
@@ -91,6 +93,87 @@ A public Cloudflare Worker demo is available for quick partner review:
 - Deployment note: [docs/cloudflare-share-demo.md](docs/cloudflare-share-demo.md)
 
 This share surface serves the dashboard and a minimal same-origin API. It is not the canonical product backend; the Python application remains authoritative for real provider operations.
+
+---
+
+## Operator Dashboard
+
+UMA also includes a private operator dashboard for local mail-ops state:
+
+- `GET /ops` serves the operator control tower.
+- `GET /v1/ops/summary` returns the redacted `uma.ops.summary.v1` payload.
+- `GET /v1/ops/history` returns the redacted bounded history index when configured.
+- `GET /v1/ops/intelligence` returns the redacted `uma.mail.intelligence.v1` historical-intelligence payload, including controlled provider/surface hint slugs, when configured.
+- `GET /v1/ops/action-plan` returns the redacted `uma.mail.action_plan.v1` next-action plan with controlled provider hint counts when intelligence is configured.
+- `GET /v1/ops/resolver-plan` returns the redacted `uma.mail.resolver_plan.v1` official-surface, blocker, provider-hint, and proof plan when intelligence is configured.
+- `GET /v1/ops/provider-surface-plan` returns the redacted `uma.provider.surface_plan.v1` provider resolver frontier from controlled provider hints.
+- `GET /v1/ops/resolver-ledger` returns redacted resolver proof state merged with local `uma.mail.resolver_receipt.v1` receipts.
+- `GET /v1/ops/github-resolver` returns a redacted `uma.github.resolver_snapshot.v1` read-only GitHub CLI/API snapshot for GitHub resolver actions.
+- `POST /v1/ops/github-resolver-receipts` records redacted resolver receipts from GitHub provider-read or blocker snapshot candidates and always requires `UMA_OPS_TOKEN`.
+- `GET /v1/ops/followup-resolver` returns a redacted `uma.followup.resolver_snapshot.v1` view of mail/LinkedIn follow-up proof from draft approval and delivery receipts.
+- `POST /v1/ops/followup-resolver-receipts` records redacted resolver receipts from existing follow-up approval/delivery proof and always requires `UMA_OPS_TOKEN`.
+- `GET /v1/ops/external-resolver` returns a redacted `uma.external.resolver_snapshot.v1` view of provider/security/billing/subscription/legal official-surface work with controlled provider hint counts.
+- `POST /v1/ops/external-resolver-receipts` records local blocker attestations only when explicitly requested and always requires `UMA_OPS_TOKEN`.
+- `POST /v1/ops/resolver-receipts` appends a redacted resolver proof receipt and always requires `UMA_OPS_TOKEN`.
+- `GET /v1/ops/action-ledger` returns redacted action status merged with local `uma.mail.action_receipt.v1` proof receipts.
+- `POST /v1/ops/action-receipts` appends a redacted local proof receipt and always requires `UMA_OPS_TOKEN`.
+- `GET /v1/ops/draft-package/{action_id}?ack_private=true` builds a gated private draft package and always requires `UMA_OPS_TOKEN`.
+- `GET /v1/ops/draft-approvals/{action_id}?ack_private=true` returns redacted local draft approval status.
+- `POST /v1/ops/draft-approvals/{action_id}` appends a redacted local draft approval receipt and always requires `UMA_OPS_TOKEN`.
+- `GET /v1/ops/delivery/{action_id}?ack_private=true` returns redacted delivery intent/status for approved draft candidates.
+- `POST /v1/ops/delivery/{action_id}` appends a redacted local delivery receipt and always requires `UMA_OPS_TOKEN`.
+- `GET /v1/ops/evidence/{evidence_id}?ack_private=true` opens gated private source evidence and always requires `UMA_OPS_TOKEN`.
+- `python3 cli.py ops-summary --report ~/System/Reports/mail-triage/latest.json` emits the same contract without running the web app.
+- `python3 cli.py ops-refresh --report ~/System/Reports/mail-triage/latest.json` writes `latest-summary.json`, `history/`, and `index.json` under user-local state.
+- `python3 cli.py mail-history-export --source ~/Library/Mail --output ~/System/Reports/mail-history/latest.json` normalizes local JSON/JSONL/mbox/EML/EMLX sources into a private `uma.mail.history_export.v1` file and prints only a redacted receipt.
+- `python3 cli.py mail-intel --history ~/System/Reports/mail-history/latest.json` mines a read-only historical export into redacted opportunities, risks, evidence, controlled provider/surface hints, and `/ops` reconciliation.
+- `python3 cli.py mail-intel --history ~/System/Reports/mail-history/latest.json --output ~/System/Reports/mail-history/latest-intelligence.json` precomputes the redacted intelligence cache and prints only a safe receipt.
+- `python3 cli.py mail-action-plan --intelligence ~/System/Reports/mail-history/latest-intelligence.json` groups the redacted findings into approval-aware next actions with controlled provider hint counts.
+- `python3 cli.py mail-resolver-plan --intelligence ~/System/Reports/mail-history/latest-intelligence.json` maps those actions to official surfaces, blockers, safe prep steps, provider hints, and required proof.
+- `python3 cli.py mail-provider-surface-plan --intelligence ~/System/Reports/mail-history/latest-intelligence.json` ranks controlled provider hints into the next provider/API/CLI resolver frontier without provider reads.
+- `python3 cli.py mail-resolver-ledger --intelligence ~/System/Reports/mail-history/latest-intelligence.json` shows official-surface resolver proof state from local receipts.
+- `python3 cli.py mail-github-resolver --intelligence ~/System/Reports/mail-history/latest-intelligence.json` runs a bounded read-only GitHub resolver snapshot through the GitHub CLI when authenticated.
+- `python3 cli.py mail-github-resolver-receipts --intelligence ~/System/Reports/mail-history/latest-intelligence.json` records provider-read or blocker GitHub snapshot candidates into the redacted resolver ledger.
+- `python3 cli.py mail-followup-resolver --intelligence ~/System/Reports/mail-history/latest-intelligence.json` shows mail/LinkedIn follow-up proof state from local approval and delivery receipts.
+- `python3 cli.py mail-followup-resolver-receipts --intelligence ~/System/Reports/mail-history/latest-intelligence.json` records resolver proof from existing follow-up approval/delivery receipts.
+- `python3 cli.py mail-external-resolver --intelligence ~/System/Reports/mail-history/latest-intelligence.json` shows provider/security/billing/subscription/legal official-surface work and controlled provider hint counts without provider reads.
+- `python3 cli.py mail-external-resolver-receipts --intelligence ~/System/Reports/mail-history/latest-intelligence.json --attest-blockers` records local blocker attestations without portal automation.
+- `python3 cli.py mail-resolver-receipt --intelligence ~/System/Reports/mail-history/latest-intelligence.json --action-id action_... --resolver-status verified_resolved --reason-code github_reconciled --proof-type github_issue_pr_billing_or_security_state --provider github` records a redacted official-surface resolver receipt.
+- `python3 cli.py mail-action-ledger --intelligence ~/System/Reports/mail-history/latest-intelligence.json` shows open/waiting/blocked/resolved action status from local receipts.
+- `python3 cli.py mail-action-receipt --intelligence ~/System/Reports/mail-history/latest-intelligence.json --action-id action_... --status waiting --reason-code awaiting_reply` records a redacted local proof receipt.
+- `python3 cli.py mail-evidence-review --history ~/System/Reports/mail-history/latest.json --evidence-id ev_... --ack-private` opens one private source message for fact checking.
+- `python3 cli.py mail-draft-package --intelligence ~/System/Reports/mail-history/latest-intelligence.json --history ~/System/Reports/mail-history/latest.json --action-id action_... --ack-private` builds private draft candidates for approval.
+- `python3 cli.py mail-draft-approval --intelligence ~/System/Reports/mail-history/latest-intelligence.json --history ~/System/Reports/mail-history/latest.json --action-id action_... --draft-id draft_... --decision approved --reason-code ready_to_send --ack-private` records a redacted local approval receipt.
+- `python3 cli.py mail-delivery-receipt --intelligence ~/System/Reports/mail-history/latest-intelligence.json --history ~/System/Reports/mail-history/latest.json --action-id action_... --draft-id draft_... --delivery-status provider_draft_requested --reason-code approved_for_provider_draft --ack-private` records redacted post-approval delivery intent without creating a provider draft or sending.
+
+Configure the API with `UMA_OPS_REPORT_PATH`. Set `UMA_OPS_TOKEN` to require a
+bearer token for operator APIs; private evidence review and receipt writes
+always require it. Redacted operator payloads intentionally omit raw senders,
+email addresses, subjects, message bodies, and full local report paths.
+See [docs/schemas/ops-summary-v1.md](docs/schemas/ops-summary-v1.md),
+[docs/schemas/mail-history-export-v1.md](docs/schemas/mail-history-export-v1.md),
+[docs/schemas/mail-action-plan-v1.md](docs/schemas/mail-action-plan-v1.md),
+[docs/schemas/mail-resolver-plan-v1.md](docs/schemas/mail-resolver-plan-v1.md),
+[docs/schemas/provider-surface-plan-v1.md](docs/schemas/provider-surface-plan-v1.md),
+[docs/schemas/mail-resolver-ledger-v1.md](docs/schemas/mail-resolver-ledger-v1.md),
+[docs/schemas/github-resolver-v1.md](docs/schemas/github-resolver-v1.md),
+[docs/schemas/followup-resolver-v1.md](docs/schemas/followup-resolver-v1.md),
+[docs/schemas/external-resolver-v1.md](docs/schemas/external-resolver-v1.md),
+[docs/schemas/mail-action-ledger-v1.md](docs/schemas/mail-action-ledger-v1.md),
+[docs/schemas/mail-evidence-review-v1.md](docs/schemas/mail-evidence-review-v1.md),
+[docs/schemas/mail-draft-package-v1.md](docs/schemas/mail-draft-package-v1.md),
+[docs/schemas/mail-draft-approval-v1.md](docs/schemas/mail-draft-approval-v1.md),
+[docs/schemas/mail-delivery-v1.md](docs/schemas/mail-delivery-v1.md),
+and
+[docs/schemas/mail-intelligence-v1.md](docs/schemas/mail-intelligence-v1.md)
+for the contracts.
+
+This is separate from the public `/app` surface: `/app` proves the product and
+safety gate, while `/ops` represents private triage queues, escaped-unread
+checks, waiting lanes, closed/reviewed work, snapshot freshness, and redacted
+history. When `UMA_HISTORICAL_MAIL_PATH` is configured, `/ops` also shows
+historical missed leads, unresolved risks, redacted evidence counts, and which
+findings are not represented in current operator lanes.
 
 ---
 
@@ -372,6 +455,166 @@ python3 cli.py escalate --provider outlook --dry-run
 python3 cli.py escalate --provider gmail
 ```
 
+### Operator Summary Command
+
+```bash
+# Emit the redacted operator dashboard payload from a local report
+python3 cli.py ops-summary --report ~/System/Reports/mail-triage/latest.json --pretty
+
+# Persist a redacted latest summary and bounded history
+python3 cli.py ops-refresh --report ~/System/Reports/mail-triage/latest.json --pretty
+
+# Optionally run the local read-only macOS Mail report producer first
+python3 cli.py ops-refresh \
+  --run-mail-triage \
+  --since 2026-05-01 \
+  --until 2026-06-16 \
+  --report-dir ~/System/Reports/mail-triage \
+  --output-dir ~/.local/state/universal-mail-automation/ops
+
+# Normalize local historical mail into the private export consumed by mail-intel
+python3 cli.py mail-history-export \
+  --source ~/Library/Mail \
+  --output ~/System/Reports/mail-history/latest.json \
+  --since 2024-01-01 \
+  --until 2026-06-16 \
+  --pretty
+
+# Mine a read-only historical export and reconcile it against the current ops report
+python3 cli.py mail-intel \
+  --history ~/System/Reports/mail-history/latest.json \
+  --ops-report ~/System/Reports/mail-triage/latest.json \
+  --output ~/System/Reports/mail-history/latest-intelligence.json \
+  --pretty
+
+# Group the redacted intelligence into approval-aware action clusters
+python3 cli.py mail-action-plan \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --pretty
+
+# Map action clusters to official surfaces, blockers, and proof requirements
+python3 cli.py mail-resolver-plan \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --pretty
+
+# Rank controlled provider hints into the next provider/API/CLI resolver frontier
+python3 cli.py mail-provider-surface-plan \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --pretty
+
+# Show official-surface resolver proof state
+python3 cli.py mail-resolver-ledger \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --pretty
+
+# Read GitHub official surfaces without mutating GitHub or mail
+python3 cli.py mail-github-resolver \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --pretty
+
+# Record GitHub provider-read or blocker proof into the resolver ledger
+python3 cli.py mail-github-resolver-receipts \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --ledger ~/.local/state/universal-mail-automation/mail-resolver-ledger.jsonl \
+  --pretty
+
+# Reconcile mail/LinkedIn follow-up state from approval and delivery receipts
+python3 cli.py mail-followup-resolver \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --pretty
+
+# Record mail/LinkedIn follow-up proof when approval or delivery receipts exist
+python3 cli.py mail-followup-resolver-receipts \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --ledger ~/.local/state/universal-mail-automation/mail-resolver-ledger.jsonl \
+  --pretty
+
+# Inspect provider/security/billing/subscription/legal external-surface work
+python3 cli.py mail-external-resolver \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --pretty
+
+# Record local blocker attestations for visible external-surface actions
+python3 cli.py mail-external-resolver-receipts \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --ledger ~/.local/state/universal-mail-automation/mail-resolver-ledger.jsonl \
+  --attest-blockers \
+  --pretty
+
+# Record redacted official-surface resolver proof
+python3 cli.py mail-resolver-receipt \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --action-id action_... \
+  --resolver-status verified_resolved \
+  --reason-code github_reconciled \
+  --proof-type github_issue_pr_billing_or_security_state \
+  --provider github \
+  --pretty
+
+# Show local action status and proof receipts
+python3 cli.py mail-action-ledger \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --pretty
+
+# Record a redacted local receipt for an action id
+python3 cli.py mail-action-receipt \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --action-id action_... \
+  --status waiting \
+  --reason-code awaiting_reply \
+  --pretty
+
+# Open one private source message for fact checking before drafting/action
+python3 cli.py mail-evidence-review \
+  --history ~/System/Reports/mail-history/latest.json \
+  --evidence-id ev_... \
+  --ack-private \
+  --pretty
+
+# Build private draft candidates for approval before any send
+python3 cli.py mail-draft-package \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --history ~/System/Reports/mail-history/latest.json \
+  --action-id action_... \
+  --ack-private \
+  --pretty
+
+# Record redacted local approval for a draft candidate
+python3 cli.py mail-draft-approval \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --history ~/System/Reports/mail-history/latest.json \
+  --action-id action_... \
+  --draft-id draft_... \
+  --decision approved \
+  --reason-code ready_to_send \
+  --ack-private \
+  --pretty
+
+# Record redacted local delivery intent/status after approval
+python3 cli.py mail-delivery-receipt \
+  --intelligence ~/System/Reports/mail-history/latest-intelligence.json \
+  --history ~/System/Reports/mail-history/latest.json \
+  --action-id action_... \
+  --draft-id draft_... \
+  --delivery-status provider_draft_requested \
+  --reason-code approved_for_provider_draft \
+  --ack-private \
+  --pretty
+
+# Or configure once and serve the private operator dashboard
+export UMA_OPS_REPORT_PATH=~/System/Reports/mail-triage/latest.json
+export UMA_OPS_HISTORY_DIR=~/.local/state/universal-mail-automation/ops
+export UMA_HISTORICAL_MAIL_PATH=~/System/Reports/mail-history/latest.json
+export UMA_HISTORICAL_INTELLIGENCE_PATH=~/System/Reports/mail-history/latest-intelligence.json
+export UMA_MAIL_ACTION_LEDGER_PATH=~/.local/state/universal-mail-automation/mail-action-ledger.jsonl
+export UMA_MAIL_RESOLVER_LEDGER_PATH=~/.local/state/universal-mail-automation/mail-resolver-ledger.jsonl
+export UMA_MAIL_DRAFT_APPROVAL_PATH=~/.local/state/universal-mail-automation/mail-draft-approvals.jsonl
+export UMA_MAIL_DELIVERY_LEDGER_PATH=~/.local/state/universal-mail-automation/mail-delivery-ledger.jsonl
+export UMA_OPS_TOKEN="choose-a-local-token"
+uvicorn api.app:app --reload
+# open /ops and use the configured bearer token
+```
+
 ### Triage Commands
 
 ```bash
@@ -466,6 +709,20 @@ mailapp:
 | `IMAP_PASS` | IMAP password | *(via 1Password)* |
 | `OUTLOOK_CLIENT_ID` | Azure app registration client ID | *(required)* |
 | `OUTLOOK_TOKEN_CACHE` | Path to Outlook token cache file | `~/.outlook_token_cache.json` |
+| `UMA_OPS_REPORT_PATH` | Local `latest.json` report used by `/v1/ops/summary` and `/ops` | *(unset; ops disabled)* |
+| `UMA_OPS_REPORT_DIR` | Report directory used by `ops-refresh --run-mail-triage` | `~/System/Reports/mail-triage` |
+| `UMA_OPS_HISTORY_DIR` | User-local directory containing `latest-summary.json`, `history/`, and `index.json` from `ops-refresh` | `~/.local/state/universal-mail-automation/ops` for CLI only |
+| `UMA_OPS_MAX_AGE_HOURS` | Freshness threshold used by `/v1/ops/summary` | `12` |
+| `UMA_OPS_TOKEN` | Optional bearer token required by `/v1/ops/summary` | *(unset; local unauthenticated)* |
+| `UMA_MAIL_TRIAGE_BIN` | Optional path to the read-only local mail-triage producer | `/Users/4jp/.local/bin/mail-triage` |
+| `UMA_HISTORICAL_MAIL_SOURCE` | Optional source path used by `mail-history-export` | *(unset; pass `--source`)* |
+| `UMA_HISTORICAL_MAIL_PATH` | Local historical mail export used by `/v1/ops/intelligence` and optional `/ops` intelligence cards | *(unset; intelligence disabled)* |
+| `UMA_HISTORICAL_INTELLIGENCE_PATH` | Optional precomputed redacted intelligence cache served by `/v1/ops/intelligence` instead of recomputing from raw export | *(unset; recompute from `UMA_HISTORICAL_MAIL_PATH`)* |
+| `UMA_HISTORICAL_STALE_DAYS` | Stale threshold for missed-lead candidates | `14` |
+| `UMA_MAIL_ACTION_LEDGER_PATH` | JSONL receipt ledger used by `/v1/ops/action-ledger`, `/v1/ops/action-receipts`, and action-ledger CLI commands | `~/.local/state/universal-mail-automation/mail-action-ledger.jsonl` |
+| `UMA_MAIL_RESOLVER_LEDGER_PATH` | JSONL receipt ledger used by `/v1/ops/resolver-ledger`, `/v1/ops/resolver-receipts`, and resolver CLI commands | `~/.local/state/universal-mail-automation/mail-resolver-ledger.jsonl` |
+| `UMA_MAIL_DRAFT_APPROVAL_PATH` | JSONL receipt ledger used by `/v1/ops/draft-approvals/{action_id}` and draft approval CLI commands | `~/.local/state/universal-mail-automation/mail-draft-approvals.jsonl` |
+| `UMA_MAIL_DELIVERY_LEDGER_PATH` | JSONL receipt ledger used by `/v1/ops/delivery/{action_id}` and delivery CLI commands | `~/.local/state/universal-mail-automation/mail-delivery-ledger.jsonl` |
 
 ### 1Password Integration
 

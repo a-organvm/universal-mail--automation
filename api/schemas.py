@@ -61,12 +61,29 @@ class AuditSummary(BaseModel):
     violations: List[str]
 
 
+class IntakePacket(BaseModel):
+    schema: str
+    product: str
+    surface: str
+    operation: str
+    status: str
+    timestamp: str
+    payload: dict
+    run_id: Optional[str] = None
+    request: Optional[dict] = None
+    actor: Optional[dict] = None
+    auth: Optional[dict] = None
+    env: Optional[str] = None
+    persona: Optional[dict] = None
+
+
 class TriageResponse(BaseModel):
     dry_run: bool
     provider: str
     receipt: str
     audit: AuditSummary
     processed: Any = None
+    packet: Optional[IntakePacket] = None
     # Set by the API: the id under which a signed receipt was persisted, fetchable
     # at GET /v1/audit/{run_id}. Optional so the engine's own dict stays valid.
     run_id: Optional[str] = None

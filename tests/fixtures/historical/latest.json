@@ -1,0 +1,77 @@
+{
+  "generated_at": "2026-06-15T17:00:00Z",
+  "since": "2026-01-01",
+  "until_exclusive": "2026-06-16",
+  "messages": [
+    {
+      "message_id": "hist-001",
+      "thread_id": "lead-thread",
+      "received_at": "2026-05-01T14:00:00Z",
+      "direction": "inbound",
+      "sender": "Private Recruiter",
+      "address": "private-recruiter@example.test",
+      "subject": "Private lead should not leak",
+      "snippet": "Could you send your availability for a project demo?",
+      "body": "Could you send your availability for a client project demo next week? We have budget and want to discuss a contract.",
+      "scope": "Archive",
+      "state": "read",
+      "labels": ["Mail Triage/LinkedIn Incoming 2026-06-15"]
+    },
+    {
+      "message_id": "hist-002",
+      "thread_id": "security-thread",
+      "received_at": "2026-06-10T09:00:00Z",
+      "direction": "inbound",
+      "sender": "Private Provider",
+      "address": "security@example-provider.test",
+      "subject": "Private security alert should not leak",
+      "snippet": "Cloudflare new sign-in detected. Please verify your account.",
+      "body": "Cloudflare security alert: new device login detected. Please verify this session and review OAuth token access.",
+      "scope": "All Mail",
+      "state": "unread",
+      "labels": ["Mail Triage/Provider Security Verify 2026-06-15"]
+    },
+    {
+      "message_id": "hist-003",
+      "thread_id": "billing-thread",
+      "received_at": "2026-06-01T12:00:00Z",
+      "direction": "inbound",
+      "sender": "Private Billing",
+      "address": "billing@example-saas.test",
+      "subject": "Private invoice should not leak",
+      "snippet": "Stripe subscription renews soon.",
+      "body": "Stripe subscription renewal is due soon. The plan price changes and the invoice requires payment verification.",
+      "scope": "All Mail",
+      "state": "read",
+      "labels": ["Mail Triage/Subscription Decision Needed 2026-06-15"]
+    },
+    {
+      "message_id": "hist-004",
+      "thread_id": "legal-thread",
+      "received_at": "2026-06-02T18:00:00Z",
+      "direction": "outbound",
+      "sender": "Private Me",
+      "address": "me@example.test",
+      "subject": "Private legal reply should not leak",
+      "snippet": "I sent the requested details.",
+      "body": "I sent the requested legal details and am waiting for attorney review.",
+      "scope": "Sent",
+      "state": "read",
+      "labels": ["Mail Triage/Legal Sent 2026-06-15"]
+    },
+    {
+      "message_id": "hist-005",
+      "thread_id": "github-thread",
+      "received_at": "2026-06-12T08:30:00Z",
+      "direction": "inbound",
+      "sender": "GitHub Private",
+      "address": "noreply@github.example",
+      "subject": "Private GitHub notification should not leak",
+      "snippet": "Security advisory for repository.",
+      "body": "GitHub security advisory requires review for a repository and a pull request needs approval.",
+      "scope": "All Mail",
+      "state": "unread",
+      "labels": ["Mail Triage/GitHub Action Needed 2026-06-15"]
+    }
+  ]
+}

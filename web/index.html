@@ -1277,10 +1277,13 @@ $("previewBtn").addEventListener("click", async () => {
     out.innerHTML = `<div class="notice err">${escapeHtml(data.detail)}</div>`;
     return;
   }
-  const a = data.audit || {};
+  const result = data && data.packet && data.packet.payload && data.packet.payload.result
+    ? data.packet.payload.result
+    : data;
+  const a = result && result.audit || {};
   const viol = (a.violations || []).length;
   out.innerHTML = `
-    <div class="receipt">${escapeHtml(data.receipt || "")}</div>
+    <div class="receipt">${escapeHtml(result.receipt || "")}</div>
     <table>
       <tr><th>Disposition</th><th>Count</th></tr>
       <tr><td>Protected - held in inbox</td><td class="held">${a.protected_held ?? 0}</td></tr>

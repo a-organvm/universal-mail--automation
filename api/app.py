@@ -11,6 +11,9 @@ Endpoints:
   *    /acp/*                           Agentic Commerce Protocol (agent checkout)
   *    /mcp                             Model Context Protocol (when mcp SDK present)
   GET  /app                             static dashboard
+  GET  /ops                             private operator dashboard
+  GET  /v1/ops/{summary,history,intelligence,action-plan,resolver-plan,provider-surface-plan,resolver-ledger,github-resolver,followup-resolver,external-resolver,action-ledger,draft-package,draft-approvals,delivery,evidence}  operator state/review
+  POST /v1/ops/{action-receipts,resolver-receipts,github-resolver-receipts,followup-resolver-receipts,external-resolver-receipts,delivery}        append redacted local receipts
 
 Run locally:  uvicorn api.app:app --reload
 """
@@ -29,6 +32,7 @@ from api import (
     __version__,
     billing,
     metering,
+    ops,
     receipts,
     schemas,
     service,
@@ -109,6 +113,11 @@ def _run(
     req: schemas.TriageRequest, *, dry_run: bool, account: Optional[dict] = None
 ) -> dict:
     try:
+        actor = None
+        auth = {"scheme": "none"}
+        if account:
+            actor = {"type": "api_account", "id": account.get("id"), "plan": account.get("plan")}
+            auth = {"scheme": "bearer", "authenticated": True}
         return triage_runtime.run_triage_with_receipt(
             provider=req.provider,
             query=req.query,
@@ -118,6 +127,10 @@ def _run(
             tier_routing=req.tier_routing,
             vip_only=req.vip_only,
             account=account,
+            surface="api",
+            actor=actor,
+            auth=auth,
+            extra={"endpoint": "/v1/triage" if not dry_run else "/v1/triage/preview"},
         )
     except triage_runtime.AccountRequired:
         raise HTTPException(status_code=401, detail="missing bearer credentials")
@@ -145,6 +158,7 @@ def _run(
 # --- additional product surfaces ---------------------------------------------
 app.include_router(billing.router)
 app.include_router(receipts.router)
+app.include_router(ops.router)
 app.include_router(acp_router.router)
 app.include_router(acp_feed.router)
 app.include_router(well_known.router)
@@ -161,7 +175,7 @@ if _MCP_AVAILABLE:
 # or /mcp.
 from pathlib import Path  # noqa: E402
 
-from fastapi.responses import RedirectResponse  # noqa: E402
+from fastapi.responses import FileResponse, RedirectResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -170,5 +184,9 @@ if _WEB_DIR.is_dir():
     @app.get("/", include_in_schema=False)
     def root() -> RedirectResponse:
         return RedirectResponse(url="/app/")
+
+    @app.get("/ops", include_in_schema=False)
+    def ops_dashboard() -> FileResponse:
+        return FileResponse(str(_WEB_DIR / "ops.html"))
 
     app.mount("/app", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")

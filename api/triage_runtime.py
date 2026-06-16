@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import secrets
-from typing import Optional
+from typing import Any, Dict, Optional
+
+from core.intake import build_triage_intake_packet
 
 from api import metering, receipts, service
 
@@ -22,6 +24,10 @@ def run_triage_with_receipt(
     tier_routing: bool,
     vip_only: bool,
     account: Optional[dict] = None,
+    surface: str = "api",
+    actor: Optional[Dict[str, Any]] = None,
+    auth: Optional[Dict[str, Any]] = None,
+    extra: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """Run triage through the safety gate, metering live mutations when needed."""
     if not dry_run and account is None:
@@ -49,6 +55,19 @@ def run_triage_with_receipt(
     run_id = "run_" + secrets.token_hex(12)
     result["run_id"] = run_id
     receipts.persist(run_id, result, account_id=account["id"] if account else None)
+    packet_result = dict(result)
+    result["packet"] = build_triage_intake_packet(
+        surface=surface,
+        run_id=run_id,
+        provider=provider,
+        dry_run=dry_run,
+        query=query,
+        limit=limit,
+        result=packet_result,
+        actor=actor,
+        auth=auth,
+        extra=extra,
+    )
     if reservation is not None:
         reservation.commit()
     return result
