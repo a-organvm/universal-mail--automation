@@ -1,13 +1,13 @@
 # HTTP API layer (see api/). Install alongside requirements.txt:
 #   pip install -r requirements.txt -r requirements-api.txt
-fastapi>=0.110
-uvicorn[standard]>=0.29
+fastapi>=0.137.1
+uvicorn[standard]>=0.49.0
 # httpx is required by fastapi.testclient (Starlette TestClient) and for tests.
-httpx>=0.27
+httpx>=0.28.1
 # pydantic is pulled in by fastapi; pinned major for clarity.
-pydantic>=2.0
+pydantic>=2.13.4
 # Stripe billing (subscriptions + Customer Portal + metered usage + the ACP
 # Shared-Payment-Token charge). Major pinned to avoid v16 breakage. Billing
 # endpoints degrade to 503 when STRIPE_SECRET_KEY is unset, so this is safe to
 # install everywhere.
-stripe>=15.2,<16
+stripe>=15.2.1,<16
