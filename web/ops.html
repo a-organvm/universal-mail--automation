@@ -307,6 +307,10 @@
     <div id="status" class="status">Loading operator summary...</div>
     <section id="metrics" class="grid"></section>
     <section class="panel">
+      <h2>Invariant — closed-with-receipt, blocked-with-reason, or waiting-with-evidence</h2>
+      <div id="invariantRollup"></div>
+    </section>
+    <section class="panel">
       <h2>Snapshot</h2>
       <div id="snapshot"></div>
       <div id="history"></div>
@@ -517,6 +521,7 @@
     const resolverProviderEl = document.getElementById("resolverProvider");
     const resolverExternalRefEl = document.getElementById("resolverExternalRef");
     const resolverLedgerEl = document.getElementById("resolverLedger");
+    const invariantRollupEl = document.getElementById("invariantRollup");
     const actionLedgerEl = document.getElementById("actionLedger");
     const receiptActionIdEl = document.getElementById("receiptActionId");
     const receiptStatusEl = document.getElementById("receiptStatus");
@@ -893,6 +898,42 @@
         renderProviderSurfacePlan(await response.json());
       } catch (error) {
         providerSurfacePlanEl.innerHTML = `<div class="sample">Provider surface plan unavailable: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadInvariantRollup(headers = null) {
+      const requestHeaders = headers || {};
+      if (!headers && tokenEl.value.trim()) {
+        requestHeaders.Authorization = `Bearer ${tokenEl.value.trim()}`;
+      }
+      try {
+        const response = await fetch("/v1/ops/resolver-ledger?max_items=1&max_receipts=1", { headers: requestHeaders });
+        if (!response.ok) {
+          invariantRollupEl.innerHTML = `<div class="sample">Invariant rollup unavailable; configure UMA_HISTORICAL_INTELLIGENCE_PATH or UMA_HISTORICAL_MAIL_PATH.</div>`;
+          return;
+        }
+        const ledger = await response.json();
+        const rollup = ledger.invariant_rollup || {};
+        const states = rollup.states || {};
+        const closed = states.closed_with_receipt || {};
+        const blocked = states.blocked_with_reason || {};
+        const waiting = states.waiting_with_evidence || {};
+        const total = rollup.total || {};
+        const unclassified = rollup.unclassified || {};
+        const holds = rollup.invariant_holds === true;
+        const cards = [
+          snapshotCard("Closed with receipt", closed.groups, `${closed.findings ?? 0} findings — proven handled`),
+          snapshotCard("Blocked with reason", blocked.groups, `${blocked.findings ?? 0} findings — explicit blocker`),
+          snapshotCard("Waiting with evidence", waiting.groups, `${waiting.findings ?? 0} findings — visible until resolved`)
+        ].join("");
+        const badge = holds
+          ? `<span style="color:#2e7d32;font-weight:700;">INVARIANT HOLDS</span>`
+          : `<span style="color:#c62828;font-weight:700;">INVARIANT VIOLATED — ${escapeHtml(unclassified.groups || 0)} unclassified (${escapeHtml((unclassified.statuses || []).join(", "))})</span>`;
+        invariantRollupEl.innerHTML =
+          `<div class="snapshot-grid">${cards}</div>` +
+          `<div class="sample">${badge} | every item across every surface sits in exactly one state | ${escapeHtml(total.groups ?? 0)} groups / ${escapeHtml(total.findings ?? 0)} findings | closed-with-receipt requires an approved, separately-confirmed send — no blind sends.</div>`;
+      } catch (error) {
+        invariantRollupEl.innerHTML = `<div class="sample">Invariant rollup unavailable: ${escapeHtml(error.message)}</div>`;
       }
     }
 
@@ -1380,6 +1421,7 @@ Send allowed: ${escapeHtml(draft.approval && draft.approval.send_allowed)}</div>
         }
         const summary = await response.json();
         render(summary);
+        await loadInvariantRollup(headers);
         await loadHistory(headers);
         await loadIntelligence(headers);
         await loadActionPlan(headers);

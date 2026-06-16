@@ -13,6 +13,7 @@ from core.mail_resolver_plan import MAIL_RESOLVER_PLAN_SCHEMA
 
 MAIL_RESOLVER_LEDGER_SCHEMA = "uma.mail.resolver_ledger.v1"
 MAIL_RESOLVER_RECEIPT_SCHEMA = "uma.mail.resolver_receipt.v1"
+MAIL_INVARIANT_ROLLUP_SCHEMA = "uma.mail.invariant_rollup.v1"
 
 RESOLVER_STATUS_VALUES = (
     "verified_waiting",
@@ -343,6 +344,67 @@ def _ledger_answers(items: List[Dict[str, Any]], kpis: Dict[str, Any], receipts:
     }
 
 
+# Maps every resolver_status to exactly one of the goal's three operator-visible
+# states. The mapping is intentionally strict: only verified_resolved (which is
+# always receipt-backed) counts as closed-with-receipt — nothing is inflated into
+# "closed". Anything not explicitly resolved or blocked stays visible as
+# waiting-with-evidence ("keep it visible until resolved").
+_INVARIANT_STATE_BY_STATUS = {
+    "verified_resolved": "closed_with_receipt",
+    "verified_blocked": "blocked_with_reason",
+    "not_started": "waiting_with_evidence",
+    "verified_waiting": "waiting_with_evidence",
+    "needs_follow_up": "waiting_with_evidence",
+    "not_found": "waiting_with_evidence",
+    "not_applicable": "waiting_with_evidence",
+}
+
+
+def build_invariant_rollup(items: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    """Roll resolver-ledger items up into the goal's one test of done.
+
+    For every item the operator must be able to see it as exactly one of:
+      - closed_with_receipt   — proven handled (verified_resolved, receipt-backed)
+      - blocked_with_reason   — an explicit blocker is recorded (verified_blocked)
+      - waiting_with_evidence — visible and evidenced, awaiting reply/follow-up/decision
+
+    ``invariant_holds`` is True iff every item maps to one of the three states —
+    i.e. nothing escaped classification. An unrecognised status (a future or
+    corrupt value) lands in ``unclassified`` and flips ``invariant_holds`` to
+    False so an escaped item is surfaced, never silently dropped.
+    """
+    states = {
+        "closed_with_receipt": {"groups": 0, "findings": 0},
+        "blocked_with_reason": {"groups": 0, "findings": 0},
+        "waiting_with_evidence": {"groups": 0, "findings": 0},
+    }
+    unclassified: Dict[str, Any] = {"groups": 0, "findings": 0, "statuses": []}
+    for item in items:
+        status = str(item.get("resolver_status") or "not_started")
+        findings = _safe_int(item.get("finding_count"))
+        state = _INVARIANT_STATE_BY_STATUS.get(status)
+        if state is None:
+            unclassified["groups"] += 1
+            unclassified["findings"] += findings
+            if status not in unclassified["statuses"]:
+                unclassified["statuses"].append(status)
+            continue
+        states[state]["groups"] += 1
+        states[state]["findings"] += findings
+    total_groups = sum(s["groups"] for s in states.values()) + unclassified["groups"]
+    total_findings = sum(s["findings"] for s in states.values()) + unclassified["findings"]
+    return {
+        "schema": MAIL_INVARIANT_ROLLUP_SCHEMA,
+        "states": states,
+        "unclassified": unclassified,
+        "total": {"groups": total_groups, "findings": total_findings},
+        "invariant_holds": unclassified["groups"] == 0,
+        "send_allowed": False,
+        "mailbox_mutations_allowed": False,
+        "portal_mutations_allowed": False,
+    }
+
+
 def build_resolver_ledger(
     resolver_plan: Union[Dict[str, Any], Path, str],
     *,
@@ -409,6 +471,7 @@ def build_resolver_ledger(
             "freeform_private_notes": False,
         },
         "kpis": kpis,
+        "invariant_rollup": build_invariant_rollup(items),
         "answers": _ledger_answers(items, kpis, receipts),
         "items": items[: max(1, int(max_items))],
         "receipts": recent,

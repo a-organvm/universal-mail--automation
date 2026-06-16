@@ -15,9 +15,11 @@ from core.historical_intelligence import build_historical_intelligence
 from core.mail_action_plan import build_action_plan
 from core.mail_resolver_plan import build_resolver_plan
 from core.mail_resolver_receipt import (
+    MAIL_INVARIANT_ROLLUP_SCHEMA,
     MAIL_RESOLVER_LEDGER_SCHEMA,
     MAIL_RESOLVER_RECEIPT_SCHEMA,
     MailResolverReceiptError,
+    build_invariant_rollup,
     build_resolver_ledger,
     build_resolver_receipt,
 )
@@ -222,3 +224,74 @@ def test_mail_resolver_ledger_cli_missing_input_fails_without_traceback(tmp_path
     assert result.returncode == 1
     assert "historical intelligence input not found" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_invariant_rollup_maps_every_status_into_one_of_three_states():
+    items = [
+        {"resolver_status": "verified_resolved", "finding_count": 3},
+        {"resolver_status": "verified_blocked", "finding_count": 5},
+        {"resolver_status": "verified_waiting", "finding_count": 2},
+        {"resolver_status": "needs_follow_up", "finding_count": 4},
+        {"resolver_status": "not_started", "finding_count": 1},
+        {"resolver_status": "not_found", "finding_count": 1},
+        {"resolver_status": "not_applicable", "finding_count": 1},
+    ]
+
+    rollup = build_invariant_rollup(items)
+
+    assert rollup["schema"] == MAIL_INVARIANT_ROLLUP_SCHEMA
+    # Strict: only verified_resolved counts as closed-with-receipt.
+    assert rollup["states"]["closed_with_receipt"] == {"groups": 1, "findings": 3}
+    assert rollup["states"]["blocked_with_reason"] == {"groups": 1, "findings": 5}
+    # waiting absorbs verified_waiting + needs_follow_up + not_started + not_found + not_applicable
+    assert rollup["states"]["waiting_with_evidence"] == {"groups": 5, "findings": 9}
+    assert rollup["unclassified"]["groups"] == 0
+    assert rollup["total"] == {"groups": 7, "findings": 17}
+    assert rollup["invariant_holds"] is True
+    assert rollup["send_allowed"] is False
+
+
+def test_invariant_rollup_flags_an_escaped_unknown_status():
+    rollup = build_invariant_rollup(
+        [
+            {"resolver_status": "verified_resolved", "finding_count": 1},
+            {"resolver_status": "some_future_status", "finding_count": 9},
+        ]
+    )
+
+    assert rollup["invariant_holds"] is False
+    assert rollup["unclassified"]["groups"] == 1
+    assert rollup["unclassified"]["findings"] == 9
+    assert rollup["unclassified"]["statuses"] == ["some_future_status"]
+
+
+def test_resolver_ledger_includes_invariant_rollup_summing_all_items(tmp_path):
+    plan = _resolver_plan(tmp_path)
+    ledger_path = tmp_path / "resolver-ledger.jsonl"
+    action_id = _github_action_id(plan)
+    build_resolver_receipt(
+        plan,
+        action_id=action_id,
+        resolver_status="verified_resolved",
+        reason_code="github_reconciled",
+        proof_type="github_issue_pr_billing_or_security_state",
+        provider="github",
+        receipt_path=ledger_path,
+    )
+
+    ledger = build_resolver_ledger(plan, receipt_path=ledger_path)
+    rollup = ledger["invariant_rollup"]
+    states = rollup["states"]
+
+    assert rollup["schema"] == MAIL_INVARIANT_ROLLUP_SCHEMA
+    # The one receipted action shows as closed-with-receipt; everything else stays visible.
+    assert states["closed_with_receipt"]["groups"] == ledger["kpis"]["verified_resolved"] == 1
+    # Rollup covers the full plan, not the truncated items list.
+    assert rollup["total"]["groups"] == ledger["kpis"]["resolver_groups"]
+    rolled = (
+        states["closed_with_receipt"]["groups"]
+        + states["blocked_with_reason"]["groups"]
+        + states["waiting_with_evidence"]["groups"]
+    )
+    assert rolled == rollup["total"]["groups"]
+    assert rollup["invariant_holds"] is True
