@@ -5,6 +5,10 @@ Provides shared categorization rules, state management, and data models
 used across all email providers (Gmail, IMAP, Mail.app, Outlook).
 """
 
+# Single source of truth for the package version (read by pyproject.toml via
+# [tool.setuptools.dynamic]).
+__version__ = "0.2.0"
+
 from core.models import EmailMessage, LabelAction, ProcessingResult
 from core.rules import (
     LABEL_RULES,

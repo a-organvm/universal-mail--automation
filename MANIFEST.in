@@ -1,0 +1,32 @@
+# Source-distribution inclusions. Wheel contents are driven by pyproject.toml
+# ([tool.setuptools] packages + py-modules); this file shapes the sdist.
+
+include LICENSE
+include README.md
+include CHANGELOG.md
+include INSTALL.md
+include requirements.txt
+include requirements-api.txt
+include requirements-mcp.txt
+include pyproject.toml
+
+# Type marker.
+include core/py.typed
+
+# Scheduling + macOS integration assets referenced by INSTALL.md.
+include com.user.mail_automation.plist
+include com.user.gmail_labeler.plist
+include scripts/build_macos_bundle.sh
+
+# Never ship secrets, local state, caches, or generated output.
+global-exclude *.py[cod]
+global-exclude __pycache__/*
+exclude *.log
+exclude *_state.json
+exclude labeler_state.json
+exclude mail_export.tsv
+exclude mail_report.md
+prune tests
+prune docs
+prune audit
+prune data

@@ -23,6 +23,7 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from core.audit import AuditLog
 
+from core import __version__
 from core.rules import (
     LABEL_RULES,
     PRIORITY_LABELS,
@@ -1030,6 +1031,12 @@ Examples:
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose logging",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show the installed version and exit",
     )
 
     # Provider options (shared across subcommands)
