@@ -5,10 +5,6 @@ Provides shared categorization rules, state management, and data models
 used across all email providers (Gmail, IMAP, Mail.app, Outlook).
 """
 
-# Single source of truth for the package version (read by pyproject.toml via
-# [tool.setuptools.dynamic]).
-__version__ = "0.2.0"
-
 from core.models import EmailMessage, LabelAction, ProcessingResult
 from core.rules import (
     LABEL_RULES,
@@ -53,13 +49,6 @@ from core.triage import (
     triage_messages,
     score_priority,
     render_triage,
-)
-from core.license import (
-    License,
-    LicenseError,
-    validate_license_key,
-    make_license_key,
-    load_license_from_env,
 )
 from core.state import StateManager
 from core.config import Config, load_config, create_sample_config
@@ -107,11 +96,6 @@ __all__ = [
     "triage_messages",
     "score_priority",
     "render_triage",
-    "License",
-    "LicenseError",
-    "validate_license_key",
-    "make_license_key",
-    "load_license_from_env",
     "StateManager",
     "Config",
     "load_config",

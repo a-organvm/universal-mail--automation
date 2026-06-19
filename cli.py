@@ -23,7 +23,6 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from core.audit import AuditLog
 
-from core import __version__
 from core.rules import (
     LABEL_RULES,
     PRIORITY_LABELS,
@@ -43,7 +42,6 @@ from core.rules import (
 from core.state import StateManager
 from core.models import LabelAction, ProcessingResult
 from core.config import load_config, apply_vip_senders_from_config
-from core.license import License, LicenseError, load_license_from_env
 from providers.base import EmailProvider, ProviderCapabilities
 
 # Logging setup
@@ -136,30 +134,6 @@ def get_provider(
 
     else:
         raise ValueError(f"Unknown provider: {provider_name}")
-
-
-def enforce_cli_license(args: argparse.Namespace, lic: License) -> None:
-    """Apply license entitlements before any provider is constructed."""
-    provider = getattr(args, "provider", "gmail")
-    allowed_providers = lic.allowed_providers
-    if allowed_providers is not None and provider not in allowed_providers:
-        raise LicenseError(
-            f"{lic.tier} tier only includes Gmail; "
-            f"'{provider}' requires a pro license"
-        )
-
-    cap = lic.daily_message_cap
-    requested_limit = getattr(args, "limit", None)
-    if cap is not None and requested_limit is not None and requested_limit > cap:
-        logger.warning(
-            "%s tier caps CLI processing at %s messages/day; reducing "
-            "--limit from %s to %s.",
-            lic.tier,
-            cap,
-            requested_limit,
-            cap,
-        )
-        args.limit = cap
 
 
 def run_labeler(
@@ -1057,12 +1031,6 @@ Examples:
         action="store_true",
         help="Enable verbose logging",
     )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {__version__}",
-        help="Show the installed version and exit",
-    )
 
     # Provider options (shared across subcommands)
     provider_group = argparse.ArgumentParser(add_help=False)
@@ -1340,12 +1308,6 @@ Examples:
     if not args.command:
         parser.print_help()
         return 1
-
-    try:
-        enforce_cli_license(args, load_license_from_env())
-    except LicenseError as e:
-        print(f"License error: {e}", file=sys.stderr)
-        return 2
 
     return args.func(args)
 

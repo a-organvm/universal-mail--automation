@@ -49,7 +49,6 @@
   - [Adding Custom Rules](#adding-custom-rules)
   - [Configuring VIP Senders](#configuring-vip-senders)
 - [Provider Capabilities Matrix](#provider-capabilities-matrix)
-- [Pricing](#pricing)
 - [Label Taxonomy](#label-taxonomy)
 - [Scheduling and Daily Automation](#scheduling-and-daily-automation)
 - [Cross-Organ Context](#cross-organ-context)
@@ -151,8 +150,7 @@ universal-mail--automation/
 │   └── mailapp.py                  # macOS Mail.app via AppleScript subprocess
 ├── auth/                           # Authentication helpers
 │   ├── __init__.py
-│   ├── service.py                  # Tokenized encrypted secret store
-│   └── onepassword.py              # Legacy 1Password CLI integration for secrets
+│   └── onepassword.py              # 1Password CLI integration for secrets
 ├── deploy.sh                       # macOS setup script (venv; launchd opt-in only)
 ├── scripts/intake_now.sh           # On-demand Gmail intake runner
 ├── run_automation.sh               # Daily runner script (all providers)
@@ -469,22 +467,9 @@ mailapp:
 | `OUTLOOK_CLIENT_ID` | Azure app registration client ID | *(required)* |
 | `OUTLOOK_TOKEN_CACHE` | Path to Outlook token cache file | `~/.outlook_token_cache.json` |
 
-### Auth Service and Legacy 1Password
+### 1Password Integration
 
-`auth/service.py` provides the replacement path for env/1Password credential
-loading: secrets are stored behind opaque `uma_auth_*` tokens in an encrypted
-SQLite store under `data/` by default, with monthly data-key rotation. Providers
-still use the legacy environment/1Password model until they are wired to resolve
-these tokens at `connect()` time.
-
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `UMA_AUTH_STORE_PATH` | SQLite path for tokenized auth secrets | `data/auth_service.db` |
-| `UMA_AUTH_KEY_PATH` | Local master-key file when `UMA_AUTH_MASTER_KEY` is unset | `data/auth_service.key` |
-| `UMA_AUTH_MASTER_KEY` | Optional base64 master key from `auth.service.generate_master_key()` | *(generated key file)* |
-
-Legacy secrets are loaded from 1Password via environment variables, typically
-sourced from a shell script:
+Secrets are loaded from 1Password via environment variables, typically sourced from a shell script:
 
 ```bash
 # ~/.config/op/mail_automation.env.op.sh
@@ -562,33 +547,6 @@ vip_senders:
 The Gmail provider is the most capable, supporting batch `batchModify` operations that can apply labels to up to 1,000 messages in a single API call. It also implements exponential backoff with retry logic for `rateLimitExceeded`, `userRateLimitExceeded`, and `quotaExceeded` errors, with a configurable base delay starting at 10 seconds.
 
 The Outlook provider uniquely supports **color categories** (25 preset colors) and **due-date flagging** that syncs with Microsoft To Do, enabling task management integration. It handles hierarchical folder creation automatically, creating nested folder paths like `Action/Critical` by walking the path segments.
-
----
-
-## Pricing
-
-**One categorization engine. Every inbox. Priced by how many you connect.**
-
-Every provider ships its own filter language, and none of them talk to each
-other. The value here is collapsing that fragmentation into a single taxonomy,
-one Eisenhower priority model, and automatic time-based escalation — so pricing
-scales with the dimension that matters: how many mailboxes you unify behind one
-brain.
-
-| Plan | Price | Connected providers | For |
-|------|-------|---------------------|-----|
-| **Free** | $0 | 1 | A single inbox, fully triaged — the complete rules, priority, escalation, and VIP system on one account. |
-| **Pro** | **$9 / mo** | 3+ | The multi-account workflow — unify personal Gmail, work Outlook, and iCloud behind one set of rules, plus voice-matched draft replies, custom rules, and scheduled automation. |
-| **Enterprise** | Custom | Unlimited | Teams needing multi-seat provisioning, SSO, managed rule sets, onboarding, and a priority support SLA. |
-
-**Get started / order:**
-
-- **Free** — clone and run locally ([Quick Start](#installation-and-quick-start)); no payment for a single provider.
-- **Preview** — try the live demo at <https://uma.4444j99.dev>.
-- **Pro** — email **padavano.anthony@gmail.com** with subject `UMA Pro`.
-- **Enterprise** — email **padavano.anthony@gmail.com** with subject `UMA Enterprise` (include team size and providers) for a custom quote.
-
-See [docs/PRICING.md](docs/PRICING.md) for the full plan comparison and value breakdown.
 
 ---
 

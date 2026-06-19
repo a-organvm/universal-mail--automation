@@ -8,9 +8,6 @@ google-auth-oauthlib>=1.4.0,<2
 msal>=1.37.0,<2
 requests>=2.34.2,<3
 
-# Auth service encrypted-at-rest token store
-cryptography>=48.0.0,<49
-
 # Optional: YAML configuration file support
 pyyaml>=6.0.3,<7
 
