@@ -150,7 +150,8 @@ universal-mail--automation/
 │   └── mailapp.py                  # macOS Mail.app via AppleScript subprocess
 ├── auth/                           # Authentication helpers
 │   ├── __init__.py
-│   └── onepassword.py              # 1Password CLI integration for secrets
+│   ├── service.py                  # Tokenized encrypted secret store
+│   └── onepassword.py              # Legacy 1Password CLI integration for secrets
 ├── deploy.sh                       # macOS setup script (venv; launchd opt-in only)
 ├── scripts/intake_now.sh           # On-demand Gmail intake runner
 ├── run_automation.sh               # Daily runner script (all providers)
@@ -467,9 +468,22 @@ mailapp:
 | `OUTLOOK_CLIENT_ID` | Azure app registration client ID | *(required)* |
 | `OUTLOOK_TOKEN_CACHE` | Path to Outlook token cache file | `~/.outlook_token_cache.json` |
 
-### 1Password Integration
+### Auth Service and Legacy 1Password
 
-Secrets are loaded from 1Password via environment variables, typically sourced from a shell script:
+`auth/service.py` provides the replacement path for env/1Password credential
+loading: secrets are stored behind opaque `uma_auth_*` tokens in an encrypted
+SQLite store under `data/` by default, with monthly data-key rotation. Providers
+still use the legacy environment/1Password model until they are wired to resolve
+these tokens at `connect()` time.
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `UMA_AUTH_STORE_PATH` | SQLite path for tokenized auth secrets | `data/auth_service.db` |
+| `UMA_AUTH_KEY_PATH` | Local master-key file when `UMA_AUTH_MASTER_KEY` is unset | `data/auth_service.key` |
+| `UMA_AUTH_MASTER_KEY` | Optional base64 master key from `auth.service.generate_master_key()` | *(generated key file)* |
+
+Legacy secrets are loaded from 1Password via environment variables, typically
+sourced from a shell script:
 
 ```bash
 # ~/.config/op/mail_automation.env.op.sh
