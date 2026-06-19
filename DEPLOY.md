@@ -56,6 +56,7 @@ money/charge endpoints return a clean `503 billing is not configured`.
 | Surface | Endpoint(s) | Secret(s) needed |
 |---|---|---|
 | Pricing catalog | `GET /v1/billing/plans` | none |
+| Account API-key issuance | `POST /v1/auth/api-keys` | `UMA_API_KEY_ISSUER_TOKEN` (`MAIL_DB_PATH` stores issued keys; default `data/app.db`) |
 | Subscription checkout | `POST /v1/billing/checkout` | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_BUSINESS` |
 | Customer portal | `POST /v1/billing/portal` | `STRIPE_SECRET_KEY` |
 | Stripe webhook | `POST /v1/billing/webhook` | `STRIPE_WEBHOOK_SECRET` |

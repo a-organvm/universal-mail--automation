@@ -601,6 +601,8 @@ mailapp:
 | `MAIL_AUTO_LOG_LEVEL` | Logging verbosity | `INFO` |
 | `MAIL_AUTO_DRY_RUN` | Enable dry-run mode globally | `false` |
 | `MAIL_AUTO_BATCH_SIZE` | Messages per processing batch | `100` |
+| `MAIL_DB_PATH` | Durable API account/API-key, billing, usage, and receipt store | `data/app.db` |
+| `UMA_API_KEY_ISSUER_TOKEN` | Operator secret required by `POST /v1/auth/api-keys` | *(required for issuance)* |
 | `IMAP_HOST` | IMAP server hostname | `imap.gmail.com` |
 | `IMAP_USER` | IMAP username | *(required)* |
 | `IMAP_PASS` | IMAP password | *(via 1Password)* |
@@ -608,6 +610,14 @@ mailapp:
 | `OUTLOOK_TOKEN_CACHE` | Path to Outlook token cache file | `~/.outlook_token_cache.json` |
 
 ### Auth Service and Legacy 1Password
+
+The HTTP API uses issued account API keys for mailbox-reading endpoints:
+`POST /v1/triage/preview`, `POST /v1/triage`, billing portal, MCP live triage,
+and agent-commerce calls that mutate paid state. Account keys are stored in
+`MAIL_DB_PATH` (`data/app.db` by default, gitignored). Issue a key with
+`POST /v1/auth/api-keys` using the operator-only `UMA_API_KEY_ISSUER_TOKEN`, then
+send it as `Authorization: Bearer <account_api_key>`. `GET /v1/auth/verify`
+checks a key and returns account metadata without echoing the key.
 
 `auth/service.py` provides the replacement path for env/1Password credential
 loading: secrets are stored behind opaque `uma_auth_*` tokens in an encrypted

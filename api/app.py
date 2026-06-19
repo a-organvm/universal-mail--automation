@@ -2,6 +2,8 @@
 
 Endpoints:
   GET  /health                          liveness
+  POST /v1/auth/api-keys                issue account API key (issuer token)
+  GET  /v1/auth/verify                  verify account API key
   POST /v1/senders/check                is this sender protected? (pure, no mailbox)
   POST /v1/triage/preview               dry-run: what WOULD be moved (nothing touched)
   POST /v1/triage                       run a triage (fail-closed on gate violation)
@@ -27,6 +29,7 @@ from acp import feed as acp_feed
 from acp import router as acp_router
 from api import (
     __version__,
+    auth,
     billing,
     metering,
     receipts,
@@ -93,15 +96,16 @@ def senders_check(req: schemas.SenderCheckRequest) -> dict:
 
 
 @app.post("/v1/triage/preview", response_model=schemas.TriageResponse)
-def triage_preview(req: schemas.TriageRequest) -> dict:
+def triage_preview(req: schemas.TriageRequest, request: Request) -> dict:
     """Dry-run: show the disposition + audit receipt without touching the mailbox."""
-    return _run(req, dry_run=True)
+    account = require_authorized_account(request)
+    return _run(req, dry_run=True, account=account)
 
 
 @app.post("/v1/triage", response_model=schemas.TriageResponse)
 def triage(req: schemas.TriageRequest, request: Request) -> dict:
     """Run a triage. Honors req.dry_run; fail-closed on any gate violation."""
-    account = None if req.dry_run else require_authorized_account(request)
+    account = require_authorized_account(request)
     return _run(req, dry_run=req.dry_run, account=account)
 
 
@@ -143,6 +147,7 @@ def _run(
 
 
 # --- additional product surfaces ---------------------------------------------
+app.include_router(auth.router)
 app.include_router(billing.router)
 app.include_router(receipts.router)
 app.include_router(acp_router.router)

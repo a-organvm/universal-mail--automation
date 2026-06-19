@@ -11,4 +11,5 @@
 ## API
 - Pricing: https://mail.example.com/v1/billing/plans
 - Protected-sender check (no mailbox): https://mail.example.com/v1/senders/check
-- Triage preview (dry-run): https://mail.example.com/v1/triage/preview
+- Account key verification: https://mail.example.com/v1/auth/verify
+- Triage preview (dry-run, account key required): https://mail.example.com/v1/triage/preview
