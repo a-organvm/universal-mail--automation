@@ -52,6 +52,8 @@ account metadata and entitlements, not the key itself.
 | POST | `/v1/senders/check` | Is this sender protected? + categorization | no |
 | POST | `/v1/triage/preview` | Dry-run: disposition + receipt, nothing touched | yes; account key required |
 | POST | `/v1/triage` | Run triage; fail-closed | yes; account key required |
+| GET | `/v1/billing/plans` | Public pricing catalog | no |
+| GET | `/v1/billing/usage` | Runs used this period + remaining headroom + upgrade hint | yes; account key required |
 
 Mailbox-reading triage endpoints require
 `Authorization: Bearer <account_api_key>`. Live runs (`dry_run:false`) reserve one
@@ -76,6 +78,11 @@ curl -s localhost:8000/v1/auth/api-keys \
 curl -s localhost:8000/v1/auth/verify \
   -H "authorization: Bearer $UMA_ACCOUNT_API_KEY"
 # {"authenticated":true,"account_id":"acct_...","entitlements":{...}, ...}
+
+curl -s localhost:8000/v1/billing/usage \
+  -H "authorization: Bearer $UMA_ACCOUNT_API_KEY"
+# {"plan":"free","live_runs_used":48,"monthly_run_cap":50,"runs_remaining":2,
+#  "near_limit":true,"upgrade":{"id":"pro","price_display":"$19/mo"}, ...}
 
 curl -s localhost:8000/v1/triage/preview \
   -H 'content-type: application/json' \

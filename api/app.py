@@ -9,6 +9,7 @@ Endpoints:
   POST /v1/triage                       run a triage (fail-closed on gate violation)
   GET  /v1/audit/{run_id}               signed, re-derivable audit receipt
   GET  /v1/billing/plans                public pricing catalog (no creds)
+  GET  /v1/billing/usage                authed usage snapshot + upgrade hint
   POST /v1/billing/{checkout,portal,webhook}   Stripe subscription billing
   *    /acp/*                           Agentic Commerce Protocol (agent checkout)
   *    /mcp                             Model Context Protocol (when mcp SDK present)

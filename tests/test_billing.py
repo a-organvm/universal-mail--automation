@@ -185,6 +185,105 @@ def test_portal_opens_for_authorized_account_customer(monkeypatch):
     assert fake.portal_sessions.params["customer"] == "cus_owned"
 
 
+def test_usage_requires_bearer():
+    assert client.get("/v1/billing/usage").status_code == 401
+
+
+def test_usage_reports_consumption_and_headroom():
+    from api import metering
+
+    store = get_store()
+    acct = store.create_account(plan="free")  # cap 50, gmail only
+    period = metering.current_period_key()
+    # Consume three live runs this period.
+    for _ in range(3):
+        store.reserve_live_run(acct["id"], period, 50)
+
+    r = client.get(
+        "/v1/billing/usage",
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["plan"] == "free"
+    assert body["period"] == period
+    assert body["live_runs_used"] == 3
+    assert body["monthly_run_cap"] == 50
+    assert body["monthly_runs_remaining"] == 47
+    assert body["runs_remaining"] == 47
+    assert body["unlimited"] is False
+    assert body["near_limit"] is False
+    assert body["at_limit"] is False
+    assert "upgrade" not in body
+
+
+def test_usage_credits_extend_total_headroom():
+    store = get_store()
+    acct = store.create_account(plan="free", run_credits=10)
+    r = client.get(
+        "/v1/billing/usage",
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+    body = r.json()
+    assert body["run_credits"] == 10
+    assert body["monthly_runs_remaining"] == 50
+    assert body["runs_remaining"] == 60  # monthly allowance + prepaid credits
+
+
+def test_usage_near_limit_nudges_to_next_paid_plan():
+    from api import metering
+
+    store = get_store()
+    acct = store.create_account(plan="free")
+    period = metering.current_period_key()
+    for _ in range(45):  # 45/50 == 90% -> past the 80% nudge threshold
+        store.reserve_live_run(acct["id"], period, 50)
+
+    body = client.get(
+        "/v1/billing/usage",
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    ).json()
+    assert body["near_limit"] is True
+    assert body["at_limit"] is False
+    assert body["upgrade"]["id"] == "pro"
+
+
+def test_usage_at_limit_is_flagged():
+    from api import metering
+
+    store = get_store()
+    acct = store.create_account(plan="free")
+    period = metering.current_period_key()
+    for _ in range(50):  # cap fully consumed, no credits
+        store.reserve_live_run(acct["id"], period, 50)
+
+    body = client.get(
+        "/v1/billing/usage",
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    ).json()
+    assert body["at_limit"] is True
+    assert body["monthly_runs_remaining"] == 0
+    assert body["runs_remaining"] == 0
+    assert body["upgrade"]["id"] == "pro"
+
+
+def test_usage_unlimited_plan_has_no_cap_and_no_upgrade():
+    store = get_store()
+    acct = store.create_account(plan="business", status="active")
+    body = client.get(
+        "/v1/billing/usage",
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    ).json()
+    assert body["plan"] == "business"
+    assert body["unlimited"] is True
+    assert body["monthly_run_cap"] is None
+    assert body["monthly_runs_remaining"] is None
+    assert body["runs_remaining"] is None
+    assert body["near_limit"] is False
+    assert body["at_limit"] is False
+    assert "upgrade" not in body
+
+
 def test_webhook_no_secret_is_503(monkeypatch):
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
     r = client.post("/v1/billing/webhook", content=b"{}",
