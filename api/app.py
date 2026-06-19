@@ -164,7 +164,7 @@ from pathlib import Path  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-_WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+_WEB_DIR = Path(__file__).resolve().parent.parent / "web" / "out"
 if _WEB_DIR.is_dir():
 
     @app.get("/", include_in_schema=False)
