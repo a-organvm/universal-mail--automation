@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `platform/saas_runner.py`: multi-tenant SaaS REST entrypoint accepting
+  `(token, provider, query, license)`, applying a safety-gated triage and
+  returning a JSON report. Adds a per-tier sliding-window request rate limiter
+  (`TierRateLimiter`) keyed by token — distinct from the monthly volume quota in
+  `api.metering`. Exposes `POST /v1/saas/triage` and `GET /v1/saas/limits`.
 - Platinum Sprint: CI/CD workflow, standardized badge row, ADR documentation
 - Initial CHANGELOG following Keep a Changelog format
 
