@@ -49,6 +49,7 @@
   - [Adding Custom Rules](#adding-custom-rules)
   - [Configuring VIP Senders](#configuring-vip-senders)
 - [Provider Capabilities Matrix](#provider-capabilities-matrix)
+- [Pricing](#pricing)
 - [Label Taxonomy](#label-taxonomy)
 - [Scheduling and Daily Automation](#scheduling-and-daily-automation)
 - [Cross-Organ Context](#cross-organ-context)
@@ -561,6 +562,33 @@ vip_senders:
 The Gmail provider is the most capable, supporting batch `batchModify` operations that can apply labels to up to 1,000 messages in a single API call. It also implements exponential backoff with retry logic for `rateLimitExceeded`, `userRateLimitExceeded`, and `quotaExceeded` errors, with a configurable base delay starting at 10 seconds.
 
 The Outlook provider uniquely supports **color categories** (25 preset colors) and **due-date flagging** that syncs with Microsoft To Do, enabling task management integration. It handles hierarchical folder creation automatically, creating nested folder paths like `Action/Critical` by walking the path segments.
+
+---
+
+## Pricing
+
+**One categorization engine. Every inbox. Priced by how many you connect.**
+
+Every provider ships its own filter language, and none of them talk to each
+other. The value here is collapsing that fragmentation into a single taxonomy,
+one Eisenhower priority model, and automatic time-based escalation — so pricing
+scales with the dimension that matters: how many mailboxes you unify behind one
+brain.
+
+| Plan | Price | Connected providers | For |
+|------|-------|---------------------|-----|
+| **Free** | $0 | 1 | A single inbox, fully triaged — the complete rules, priority, escalation, and VIP system on one account. |
+| **Pro** | **$9 / mo** | 3+ | The multi-account workflow — unify personal Gmail, work Outlook, and iCloud behind one set of rules, plus voice-matched draft replies, custom rules, and scheduled automation. |
+| **Enterprise** | Custom | Unlimited | Teams needing multi-seat provisioning, SSO, managed rule sets, onboarding, and a priority support SLA. |
+
+**Get started / order:**
+
+- **Free** — clone and run locally ([Quick Start](#installation-and-quick-start)); no payment for a single provider.
+- **Preview** — try the live demo at <https://uma.4444j99.dev>.
+- **Pro** — email **padavano.anthony@gmail.com** with subject `UMA Pro`.
+- **Enterprise** — email **padavano.anthony@gmail.com** with subject `UMA Enterprise` (include team size and providers) for a custom quote.
+
+See [docs/PRICING.md](docs/PRICING.md) for the full plan comparison and value breakdown.
 
 ---
 
