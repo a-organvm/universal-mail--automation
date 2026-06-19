@@ -54,6 +54,13 @@ from core.triage import (
     score_priority,
     render_triage,
 )
+from core.license import (
+    License,
+    LicenseError,
+    validate_license_key,
+    make_license_key,
+    load_license_from_env,
+)
 from core.state import StateManager
 from core.config import Config, load_config, create_sample_config
 
@@ -100,6 +107,11 @@ __all__ = [
     "triage_messages",
     "score_priority",
     "render_triage",
+    "License",
+    "LicenseError",
+    "validate_license_key",
+    "make_license_key",
+    "load_license_from_env",
     "StateManager",
     "Config",
     "load_config",
