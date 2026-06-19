@@ -43,6 +43,7 @@ def build_agent_manifest(base_url: str) -> dict:
         "api": {
             "base_url": base,
             "openapi": f"{base}/openapi.json",
+            "auth_verify": f"{base}/v1/auth/verify",
             "pricing": f"{base}/v1/billing/plans",
             "receipt_verification": f"{base}/v1/audit/{{run_id}}",
         },
@@ -74,7 +75,8 @@ def build_llms_txt(base_url: str) -> str:
         "## API",
         f"- Pricing: {base}/v1/billing/plans",
         f"- Protected-sender check (no mailbox): {base}/v1/senders/check",
-        f"- Triage preview (dry-run): {base}/v1/triage/preview",
+        f"- Account key verification: {base}/v1/auth/verify",
+        f"- Triage preview (dry-run, account key required): {base}/v1/triage/preview",
         "",
     ])
 
