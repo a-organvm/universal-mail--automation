@@ -5,7 +5,8 @@ This repository includes a Cloudflare Worker share surface for quick partner rev
 - Live URL: `https://uma.4444j99.dev`
 - Worker entrypoint: `cloudflare/worker.mjs`
 - Worker config: `wrangler.toml`
-- Static frontend assets: `web/`
+- Static frontend source: `web/`
+- Static frontend assets: `web/out/` after `npm run build`
 
 ## Purpose
 
@@ -28,16 +29,21 @@ Billing mutation endpoints intentionally return an unavailable response on the s
 Deploy from the repository root:
 
 ```sh
+npm ci --prefix web
+npm run build --prefix web
 wrangler deploy
 ```
 
-The deploy uses `wrangler.toml` and publishes the Worker plus `web/` assets. Verify the live surface after deploy before claiming the share URL is current.
+The deploy uses `wrangler.toml` and publishes the Worker plus the built
+`web/out/` assets. Verify the live surface after deploy before claiming the
+share URL is current.
 
 ## CI Deployment
 
 The main CI workflow includes a `cloudflare-share-deploy` job for pushes to
-`main`. It runs after the Python test matrix and deploys with `wrangler deploy`
-when the repository secret `CLOUDFLARE_API_TOKEN` is configured.
+`main`. It runs after Python tests, the Python package build, web lint/build,
+and Worker tests, then deploys with `wrangler deploy` when the repository secret
+`CLOUDFLARE_API_TOKEN` is configured.
 
 After deployment, CI smoke-tests the live share surface:
 

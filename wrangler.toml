@@ -7,5 +7,5 @@ routes = [
 ]
 
 [assets]
-directory = "./web"
+directory = "./web/out"
 binding = "ASSETS"
