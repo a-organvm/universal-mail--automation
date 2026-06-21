@@ -22,7 +22,6 @@
   "api": {
     "base_url": "https://mail.example.com",
     "openapi": "https://mail.example.com/openapi.json",
-    "auth_verify": "https://mail.example.com/v1/auth/verify",
     "pricing": "https://mail.example.com/v1/billing/plans",
     "receipt_verification": "https://mail.example.com/v1/audit/{run_id}"
   },

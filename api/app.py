@@ -2,14 +2,11 @@
 
 Endpoints:
   GET  /health                          liveness
-  POST /v1/auth/api-keys                issue account API key (issuer token)
-  GET  /v1/auth/verify                  verify account API key
   POST /v1/senders/check                is this sender protected? (pure, no mailbox)
   POST /v1/triage/preview               dry-run: what WOULD be moved (nothing touched)
   POST /v1/triage                       run a triage (fail-closed on gate violation)
   GET  /v1/audit/{run_id}               signed, re-derivable audit receipt
   GET  /v1/billing/plans                public pricing catalog (no creds)
-  GET  /v1/billing/usage                authed usage snapshot + upgrade hint
   POST /v1/billing/{checkout,portal,webhook}   Stripe subscription billing
   *    /acp/*                           Agentic Commerce Protocol (agent checkout)
   *    /mcp                             Model Context Protocol (when mcp SDK present)
@@ -30,7 +27,6 @@ from acp import feed as acp_feed
 from acp import router as acp_router
 from api import (
     __version__,
-    auth,
     billing,
     metering,
     receipts,
@@ -97,16 +93,15 @@ def senders_check(req: schemas.SenderCheckRequest) -> dict:
 
 
 @app.post("/v1/triage/preview", response_model=schemas.TriageResponse)
-def triage_preview(req: schemas.TriageRequest, request: Request) -> dict:
+def triage_preview(req: schemas.TriageRequest) -> dict:
     """Dry-run: show the disposition + audit receipt without touching the mailbox."""
-    account = require_authorized_account(request)
-    return _run(req, dry_run=True, account=account)
+    return _run(req, dry_run=True)
 
 
 @app.post("/v1/triage", response_model=schemas.TriageResponse)
 def triage(req: schemas.TriageRequest, request: Request) -> dict:
     """Run a triage. Honors req.dry_run; fail-closed on any gate violation."""
-    account = require_authorized_account(request)
+    account = None if req.dry_run else require_authorized_account(request)
     return _run(req, dry_run=req.dry_run, account=account)
 
 
@@ -148,7 +143,6 @@ def _run(
 
 
 # --- additional product surfaces ---------------------------------------------
-app.include_router(auth.router)
 app.include_router(billing.router)
 app.include_router(receipts.router)
 app.include_router(acp_router.router)
@@ -170,7 +164,7 @@ from pathlib import Path  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-_WEB_DIR = Path(__file__).resolve().parent.parent / "web" / "out"
+_WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 if _WEB_DIR.is_dir():
 
     @app.get("/", include_in_schema=False)

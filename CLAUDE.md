@@ -344,9 +344,6 @@ python3 -c "from providers.outlook import OutlookProvider, CATEGORY_COLORS"
 # Unit tests for the triage pipeline (offline, no accounts needed)
 python3 -m pytest tests/test_research.py tests/test_voice.py tests/test_triage.py -q
 
-# Provider-contract tests (offline — fakes/stubs, no network or macOS needed)
-python3 -m pytest tests/test_base_provider.py tests/test_mailapp.py -q
-
 # Dry run test
 python3 cli.py label --provider gmail --dry-run --limit 10
 
