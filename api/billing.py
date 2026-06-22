@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import os
 from typing import Optional
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -74,6 +75,52 @@ def _client():
 
 def _base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
+
+
+def _allowed_redirect_hosts(request: Request) -> set[str]:
+    """Hostnames a caller-supplied redirect URL may point at.
+
+    Always the API's own host (the defaults below redirect to ``{base}/app/``);
+    extend via ``UMA_ALLOWED_REDIRECT_HOSTS`` (comma-separated) when the dashboard
+    is served from a different origin than the API.
+    """
+    hosts: set[str] = set()
+    base_host = urlsplit(_base_url(request)).hostname
+    if base_host:
+        hosts.add(base_host.lower())
+    for h in os.environ.get("UMA_ALLOWED_REDIRECT_HOSTS", "").split(","):
+        h = h.strip().lower()
+        if h:
+            hosts.add(h)
+    return hosts
+
+
+def _validate_redirect_url(
+    url: Optional[str], request: Request, field: str
+) -> Optional[str]:
+    """Reject caller-supplied redirect URLs that aren't same-origin.
+
+    Stripe sends the buyer's browser to ``success_url``/``cancel_url``/``return_url``
+    after checkout, so an unvalidated value is an open-redirect (phishing) and SSRF
+    vector. We require an absolute http(s) URL, with no embedded credentials, whose
+    host is in the allowlist. ``None`` passes through so the same-origin default is
+    used. Raises HTTP 400 on anything else.
+    """
+    if not url:
+        return None
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail=f"{field} must use http or https")
+    # `user:pass@host` would let the host check pass while the browser navigates
+    # elsewhere — refuse any embedded credentials outright.
+    if parts.username or parts.password or "@" in parts.netloc:
+        raise HTTPException(
+            status_code=400, detail=f"{field} must not embed credentials"
+        )
+    host = (parts.hostname or "").lower()
+    if not host or host not in _allowed_redirect_hosts(request):
+        raise HTTPException(status_code=400, detail=f"{field} host is not allowed")
+    return url
 
 
 # -- models -----------------------------------------------------------------
@@ -202,14 +249,19 @@ def create_checkout(req: CheckoutRequest, request: Request) -> dict:
         account_id = account["id"]
         account_api_key = account["api_key"]  # allow-secret: generated credential
 
+    # Caller-supplied redirect targets are open-redirect/SSRF vectors — pin them
+    # to the allowlist before they ever reach Stripe.
+    success_url = _validate_redirect_url(req.success_url, request, "success_url")
+    cancel_url = _validate_redirect_url(req.cancel_url, request, "cancel_url")
+
     client = _client()
     base = _base_url(request)
     params = {
         "mode": "subscription",
         "line_items": [{"price": price_id, "quantity": 1}],
-        "success_url": req.success_url
+        "success_url": success_url
         or f"{base}/app/?billing=success&session_id={{CHECKOUT_SESSION_ID}}",
-        "cancel_url": req.cancel_url or f"{base}/app/?billing=cancel",
+        "cancel_url": cancel_url or f"{base}/app/?billing=cancel",
         "client_reference_id": account_id,
         "metadata": {"account_id": account_id, "plan": plan.id},
         "subscription_data": {"metadata": {"account_id": account_id, "plan": plan.id}},
@@ -241,12 +293,14 @@ def create_portal(req: PortalRequest, request: Request) -> dict:
     if not customer_id:
         raise HTTPException(status_code=404, detail="no Stripe customer for account")
 
+    return_url = _validate_redirect_url(req.return_url, request, "return_url")
+
     client = _client()
     try:
         session = client.v1.billing_portal.sessions.create(
             params={
                 "customer": customer_id,
-                "return_url": req.return_url or f"{_base_url(request)}/app/",
+                "return_url": return_url or f"{_base_url(request)}/app/",
             }
         )
     except Exception as e:
