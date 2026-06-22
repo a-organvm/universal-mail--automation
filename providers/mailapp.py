@@ -338,8 +338,9 @@ class MailAppProvider(EmailProvider):
                 set targetMailbox to mailbox "{label}" {account_filter}
                 return "exists"
             on error
-                -- Create mailbox
-                make new mailbox with properties {{name:"{label}"}} {account_filter}
+                -- Create mailbox (must use `at end of mailboxes [of account]`; the
+                -- bare `make new mailbox with properties {{...}} of account` form errors)
+                make new mailbox at end of mailboxes {account_filter} with properties {{name:"{label}"}}
                 return "created"
             end try
         end tell
@@ -385,6 +386,55 @@ class MailAppProvider(EmailProvider):
             return True
         except RuntimeError as e:
             logger.error(f"Failed to mark unread: {e}")
+            return False
+
+    @staticmethod
+    def _as_applescript(s: str) -> str:
+        """Render a Python string as a valid AppleScript string EXPRESSION, preserving
+        newlines (AppleScript literals can't hold a raw newline) and escaping quotes."""
+        s = (s or "").replace("\\", "\\\\").replace('"', '\\"')
+        s = s.replace("\r\n", "\n").replace("\r", "\n").replace("\n", '" & linefeed & "')
+        return '"' + s + '"'
+
+    def create_draft(self, to_addr: str, subject: str, body: str,
+                     account: Optional[str] = None) -> bool:
+        """Save a DRAFT (never sent) to Mail.app, addressed to ``to_addr``.
+
+        Keyless outbound: ``make new outgoing message … save`` writes to the Drafts
+        mailbox. Drafts is a REAL folder (even on Gmail, where the inbox is a label),
+        so unlike archiving this sticks reliably with no write-scope gate. When an
+        ``account`` is given we route the draft from that account's address so it lands
+        in the right Drafts and replies from the right identity; on lookup failure it
+        falls back to the default account (fail-open, never errors out).
+
+        This NEVER sends — there is no ``send`` call and no scheduling. The user always
+        presses send. Returns True on save."""
+        acct = account or self.account
+        subj_e = self._as_applescript(subject)
+        body_e = self._as_applescript(body)
+        to_e = self._as_applescript(to_addr)
+        acct_e = self._as_applescript(acct) if acct else None
+        from_block = (f'''
+            try
+                set fromAddr to item 1 of (get email addresses of account {acct_e})
+                try
+                    set sender of newMsg to fromAddr
+                end try
+            end try''' if acct_e else "")
+        script = f'''
+        tell application "Mail"
+            set newMsg to make new outgoing message with properties {{subject:{subj_e}, content:{body_e}, visible:false}}
+            tell newMsg
+                make new to recipient at end of to recipients with properties {{address:{to_e}}}
+            end tell{from_block}
+            save newMsg
+            return "saved"
+        end tell
+        '''
+        try:
+            return self._run_applescript(script).strip() == "saved"
+        except RuntimeError as e:
+            logger.error(f"Failed to create draft to {to_addr}: {e}")
             return False
 
     def get_accounts(self) -> List[str]:
