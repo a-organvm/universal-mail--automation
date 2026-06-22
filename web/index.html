@@ -1,0 +1,1383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Universal Mail Automation - Protected Inbox Audit</title>
+<meta name="description" content="A non-destructive inbox risk check for protected senders, payment trails, legal notices, and client messages across Gmail, Outlook, iCloud, and IMAP." />
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f7f9fb;
+    --paper: #ffffff;
+    --paper-2: #f1f5f8;
+    --ink: #11161c;
+    --muted: #5b6673;
+    --quiet: #8793a0;
+    --line: #dfe6ec;
+    --line-strong: #c7d1db;
+    --accent: #00a7b5;
+    --accent-strong: #007c86;
+    --accent-soft: #e4fbfd;
+    --risk: #c26a18;
+    --risk-soft: #fff2df;
+    --ok: #0e7f62;
+    --ok-soft: #e5f8f2;
+    --green: var(--ok);
+    --green-2: var(--accent-strong);
+    --green-soft: var(--ok-soft);
+    --danger: #b42318;
+    --danger-soft: #fde9e7;
+    --shadow: 0 18px 50px rgba(17, 22, 28, .08);
+    --radius: 8px;
+    --ease: cubic-bezier(.22, 1, .36, 1);
+    --accent-rgb: 0, 167, 181;
+  }
+
+  /* ── Provider brand themes ──────────────────────────────────────────
+     The dashboard adopts the visual identity of the mailbox provider it
+     is interfacing: pick a provider (nav dial, chips, or the triage
+     select) and the accent family shifts in phase with it. Tokens only —
+     layout and semantics untouched. No attribute = Universal teal. */
+  html[data-provider="gmail"] {
+    --accent: #ea4335;
+    --accent-strong: #c5221f;
+    --accent-soft: #fce8e6;
+    --accent-rgb: 234, 67, 53;
+  }
+  html[data-provider="outlook"] {
+    --accent: #0078d4;
+    --accent-strong: #005a9e;
+    --accent-soft: #e3f0fb;
+    --accent-rgb: 0, 120, 212;
+  }
+  html[data-provider="icloud"] {
+    --accent: #3478f6;
+    --accent-strong: #1d5fd6;
+    --accent-soft: #e8f0fe;
+    --accent-rgb: 52, 120, 246;
+  }
+  html[data-provider="imap"] {
+    --accent: #0e7f62;
+    --accent-strong: #0a5f4a;
+    --accent-soft: #e5f8f2;
+    --accent-rgb: 14, 127, 98;
+  }
+
+  /* Phase-shift: applied transiently while a theme swap is in flight so
+     the whole surface cross-fades instead of snapping. Removed after the
+     swap so it cannot interfere with normal micro-interactions. */
+  html.theme-anim *,
+  html.theme-anim *::before,
+  html.theme-anim *::after {
+    transition:
+      background-color .7s var(--ease),
+      border-color .7s var(--ease),
+      color .7s var(--ease),
+      box-shadow .7s var(--ease),
+      outline-color .7s var(--ease),
+      fill .7s var(--ease),
+      stroke .7s var(--ease) !important;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html.theme-anim *,
+    html.theme-anim *::before,
+    html.theme-anim *::after { transition: none !important; }
+  }
+
+  /* Nav theme dial: one dot per mailbox identity */
+  .theme-dial {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--paper);
+  }
+  .theme-dial .dot {
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--dot, var(--accent));
+    opacity: .55;
+    transform: scale(.9);
+    transition: opacity .25s var(--ease), transform .25s var(--ease), box-shadow .25s var(--ease);
+  }
+  .theme-dial .dot:hover { opacity: .85; }
+  .theme-dial .dot.active {
+    opacity: 1;
+    transform: scale(1.12);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .22);
+  }
+  .theme-dial .dot[data-theme=""] { --dot: #00a7b5; }
+  .theme-dial .dot[data-theme="gmail"] { --dot: #ea4335; }
+  .theme-dial .dot[data-theme="outlook"] { --dot: #0078d4; }
+  .theme-dial .dot[data-theme="icloud"] { --dot: #3478f6; }
+  .theme-dial .dot[data-theme="imap"] { --dot: #0e7f62; }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 82% 8%, rgba(var(--accent-rgb), .11), transparent 28rem),
+      linear-gradient(180deg, #fff 0%, var(--bg) 44%, #fff 100%);
+    color: var(--ink);
+    font: 15px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg, rgba(17, 22, 28, .035) 1px, transparent 1px),
+      linear-gradient(180deg, rgba(17, 22, 28, .028) 1px, transparent 1px);
+    background-size: 88px 88px;
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, .72), rgba(0, 0, 0, .05) 70%, transparent);
+  }
+
+  a { color: var(--accent-strong); }
+  button, input, select { font: inherit; }
+  button { cursor: pointer; }
+  .wrap { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+  .skip {
+    position: absolute;
+    left: -999px;
+    top: 12px;
+    z-index: 100;
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    color: var(--ink);
+    border-radius: var(--radius);
+  }
+  .skip:focus { left: 20px; }
+  :focus-visible { outline: 3px solid rgba(var(--accent-rgb), .26); outline-offset: 2px; }
+
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    border-bottom: 1px solid rgba(223, 230, 236, .82);
+    background: rgba(255, 255, 255, .82);
+    backdrop-filter: blur(18px) saturate(140%);
+  }
+  .bar { min-height: 66px; display: flex; align-items: center; gap: 22px; }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 760;
+  }
+  .brand-mark {
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--accent);
+    border-radius: 7px;
+    display: grid;
+    place-items: center;
+    position: relative;
+  }
+  .brand-mark::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--accent);
+    border-top: 0;
+    border-radius: 1px 1px 5px 5px;
+    transform: translateY(1px);
+  }
+  .links { margin-left: auto; display: flex; align-items: center; gap: 22px; }
+  .links a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 690;
+  }
+  .links a:hover { color: var(--ink); }
+
+  .btn {
+    min-height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    padding: 0 16px;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 760;
+    transition: transform .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease), color .18s var(--ease);
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--accent); color: #061216; border-color: var(--accent); }
+  .btn-primary:hover { background: #11bfd0; border-color: #11bfd0; }
+  .btn-secondary { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent-strong); }
+  .links .btn { min-height: 38px; padding: 0 14px; }
+
+  .hero { padding: 76px 0 38px; }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 490px);
+    gap: clamp(32px, 6vw, 76px);
+    align-items: start;
+  }
+  .hero h1 {
+    margin: 0;
+    max-width: 780px;
+    font-size: clamp(44px, 6.4vw, 86px);
+    line-height: .96;
+    font-weight: 820;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+  .lede {
+    margin: 24px 0 0;
+    max-width: 670px;
+    color: var(--muted);
+    font-size: clamp(17px, 2vw, 20px);
+    line-height: 1.55;
+  }
+  .ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .hero-note {
+    margin-top: 28px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    color: var(--quiet);
+    font-size: 13px;
+  }
+  .hero-note strong { color: var(--ink); font-weight: 760; }
+  .hero-note span,
+  .reveal summary,
+  .agent-reveal summary,
+  .plan-reveal summary,
+  .agent-card summary,
+  .quick-picks button,
+  .btn,
+  label {
+    white-space: nowrap;
+  }
+
+  .console {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .9);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .console-top {
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .console-title { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; }
+  .console-title::before {
+    content: "";
+    width: 17px;
+    height: 17px;
+    border: 1.7px solid var(--accent);
+    border-top: 0;
+    border-radius: 1px 1px 6px 6px;
+  }
+  .status-dot { display: inline-flex; align-items: center; gap: 7px; color: var(--ok); font-size: 12px; font-weight: 760; }
+  .status-dot::before { content: ""; width: 7px; height: 7px; border-radius: 99px; background: var(--ok); }
+  .console-body { padding: 16px; display: grid; gap: 14px; }
+  .reveal-stack { display: grid; gap: 9px; }
+  .reveal {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, .82);
+    overflow: hidden;
+  }
+  .reveal summary {
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 12px;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 800;
+    list-style: none;
+    cursor: pointer;
+  }
+  .reveal summary::-webkit-details-marker { display: none; }
+  .reveal summary::after {
+    content: "+";
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    color: var(--accent-strong);
+    font-size: 14px;
+    line-height: 1;
+  }
+  .reveal[open] summary {
+    border-bottom: 1px solid var(--line);
+    background: var(--paper);
+  }
+  .reveal[open] summary::after { content: "-"; }
+  .reveal-body { padding: 12px; display: grid; gap: 12px; }
+  .console-meta {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--line);
+  }
+  .meta-cell {
+    min-height: 58px;
+    background: rgba(255, 255, 255, .86);
+    padding: 10px;
+  }
+  .meta-cell span {
+    display: block;
+    color: var(--quiet);
+    font-size: 10px;
+    font-weight: 830;
+    text-transform: uppercase;
+  }
+  .meta-cell strong {
+    display: block;
+    margin-top: 5px;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.15;
+  }
+  .fieldline {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: end;
+  }
+  label { display: block; margin: 0 0 7px; color: var(--muted); font-size: 12px; font-weight: 760; }
+  input, select {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--ink);
+    padding: 0 12px;
+    font-size: 14px;
+    transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
+  }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), .12); outline: 0; }
+  .provider-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .provider {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--paper);
+    padding: 6px 10px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 760;
+  }
+  .provider.active { border-color: rgba(var(--accent-rgb), .42); background: var(--accent-soft); color: var(--accent-strong); }
+  button.provider { cursor: pointer; transition: border-color .2s var(--ease), background .2s var(--ease), color .2s var(--ease); }
+  button.provider:hover { border-color: rgba(var(--accent-rgb), .42); color: var(--ink); }
+  .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .mini {
+    min-height: 88px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--paper-2);
+    padding: 12px;
+  }
+  .mini span { display: block; color: var(--quiet); font-size: 11px; font-weight: 800; text-transform: uppercase; }
+  .mini strong { display: block; margin-top: 8px; color: var(--ink); font-size: 20px; line-height: 1.05; font-weight: 840; }
+  .mini small { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.3; }
+  .receipt {
+    border-radius: var(--radius);
+    background: #121820;
+    color: #dce9ef;
+    padding: 12px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    overflow-wrap: anywhere;
+  }
+  .audit-rail {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  .rail-item {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    padding: 9px;
+  }
+  .rail-item span {
+    display: block;
+    color: var(--quiet);
+    font-size: 10px;
+    font-weight: 830;
+    text-transform: uppercase;
+  }
+  .rail-item strong {
+    display: block;
+    margin-top: 4px;
+    color: var(--ink);
+    font-size: 13px;
+  }
+  .rail-item.ok strong { color: var(--ok); }
+  .rows { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .preview-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+    background: #fff;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .preview-row:last-child { border-bottom: 0; }
+  .preview-row span { color: var(--muted); }
+  .tag {
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 830;
+  }
+  .tag.ok { background: var(--ok-soft); color: var(--ok); }
+  .tag.risk { background: var(--risk-soft); color: var(--risk); }
+  .tag.neutral { background: var(--paper-2); color: var(--muted); }
+
+  main { padding-bottom: 34px; }
+  .proof-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    margin-top: 20px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--line);
+  }
+  .proof {
+    min-height: 96px;
+    background: rgba(255, 255, 255, .92);
+    padding: 0;
+  }
+  .proof summary {
+    min-height: 96px;
+    display: grid;
+    align-content: center;
+    gap: 12px;
+    padding: 18px;
+    list-style: none;
+    cursor: pointer;
+  }
+  .proof summary::-webkit-details-marker { display: none; }
+  .proof summary::after,
+  .step summary::after,
+  .agent-card summary::after {
+    content: "+";
+    color: var(--accent-strong);
+    font-size: 14px;
+    font-weight: 800;
+  }
+  .proof[open] summary,
+  .step[open] summary,
+  .agent-card[open] summary {
+    border-bottom: 1px solid var(--line);
+  }
+  .proof[open] summary::after,
+  .step[open] summary::after,
+  .agent-card[open] summary::after {
+    content: "-";
+  }
+  .proof svg { width: 22px; height: 22px; color: var(--accent-strong); stroke-width: 1.8; }
+  .proof h3 { margin: 0; font-size: 15px; line-height: 1.2; }
+  .proof p { margin: 0; padding: 0 18px 18px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+  section { padding: 70px 0 0; }
+  .section-head {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 28px;
+    margin-bottom: 24px;
+  }
+  .section-head h2 {
+    margin: 0;
+    max-width: 760px;
+    font-size: clamp(30px, 4vw, 50px);
+    line-height: 1;
+    font-weight: 820;
+    white-space: nowrap;
+  }
+  .section-head p { margin: 0; max-width: 420px; color: var(--muted); }
+  .workflow {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--line);
+  }
+  .step {
+    min-height: 170px;
+    background: #fff;
+    padding: 0;
+  }
+  .step + .step { border-left: 1px solid var(--line); }
+  .step summary {
+    min-height: 170px;
+    display: grid;
+    align-content: start;
+    gap: 18px;
+    padding: 22px;
+    list-style: none;
+    cursor: pointer;
+  }
+  .step summary::-webkit-details-marker { display: none; }
+  .step-num { color: var(--accent-strong); font-size: 12px; font-weight: 840; }
+  .step h3 { margin: 0; font-size: 22px; line-height: 1.05; }
+  .step p { margin: 0; padding: 0 22px 22px; color: var(--muted); }
+
+  .demo-grid {
+    display: grid;
+    grid-template-columns: minmax(0, .92fr) minmax(360px, 1.08fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .9);
+    box-shadow: 0 12px 36px rgba(17, 22, 28, .06);
+    padding: 18px;
+  }
+  .panel h3 { margin: 0 0 14px; font-size: 18px; }
+  .stack { display: grid; gap: 13px; }
+  .quick-picks { display: flex; flex-wrap: wrap; gap: 8px; }
+  .quick-picks button {
+    min-height: 31px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    color: var(--muted);
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 760;
+  }
+  .quick-picks button:hover { color: var(--accent-strong); border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .result { margin-top: 14px; }
+  .verdict {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-radius: var(--radius);
+    padding: 13px;
+    font-size: 14px;
+    font-weight: 820;
+  }
+  .verdict.protected { background: var(--ok-soft); color: var(--ok); }
+  .verdict.open { background: var(--paper-2); color: var(--ink); }
+  .verdict .icon {
+    width: 22px;
+    height: 22px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 6px;
+    border: 1px solid currentColor;
+    font-size: 0;
+  }
+  .verdict .icon::before { content: ""; width: 10px; height: 10px; border: 2px solid currentColor; border-top: 0; border-radius: 1px 1px 5px 5px; }
+  .meta { margin-top: 9px; color: var(--muted); font-size: 13px; }
+  .notice { margin-top: 12px; border-radius: var(--radius); padding: 12px; font-size: 13px; }
+  .notice.warn { background: var(--risk-soft); color: var(--risk); border: 1px solid #f5d3a6; }
+  .notice.err { background: var(--danger-soft); color: var(--danger); border: 1px solid #f4c7c3; }
+  .notice.ok { background: var(--ok-soft); color: var(--ok); border: 1px solid #bfe9db; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; }
+  th { color: var(--muted); font-weight: 800; }
+  .held, .violations-ok { color: var(--ok); font-weight: 840; }
+  .violations-bad { color: var(--danger); font-weight: 840; }
+
+  .pricing {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  .plan {
+    position: relative;
+    min-height: 285px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+  }
+  .plan.feature { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), .09); }
+  .plan h3 { margin: 0; font-size: 18px; }
+  .plan .price { margin-top: 12px; font-size: 34px; line-height: 1; font-weight: 840; }
+  .plan .blurb { margin: 0; color: var(--muted); font-size: 13px; }
+  .plan ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; color: var(--ink); font-size: 13px; }
+  .plan li { padding-left: 18px; position: relative; }
+  .plan li::before { content: ""; position: absolute; left: 0; top: .62em; width: 7px; height: 7px; border-radius: 99px; background: var(--accent); }
+  .plan .btn { margin-top: auto; width: 100%; }
+  .plans-foot { margin-top: 14px; max-width: 430px; }
+  .plan-reveal {
+    margin: 16px 0 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .plan-reveal summary {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 11px;
+    font-size: 12px;
+    font-weight: 820;
+    list-style: none;
+    cursor: pointer;
+  }
+  .plan-reveal summary::-webkit-details-marker { display: none; }
+  .plan-reveal summary::after { content: "+"; color: var(--accent-strong); }
+  .plan-reveal[open] summary { border-bottom: 1px solid var(--line); }
+  .plan-reveal[open] summary::after { content: "-"; }
+  .plan-reveal-body { padding: 11px; display: grid; gap: 10px; }
+
+  .agent-grid {
+    display: grid;
+    grid-template-columns: .92fr 1.08fr;
+    gap: 14px;
+    align-items: stretch;
+  }
+  .agent-terminal {
+    min-height: 100%;
+    border: 1px solid #1f2a35;
+    border-radius: 12px;
+    background: #111820;
+    color: #dce9ef;
+    padding: 18px;
+    display: grid;
+    align-content: start;
+    gap: 14px;
+    box-shadow: 0 18px 44px rgba(17, 22, 28, .16);
+  }
+  .agent-terminal h3 { margin: 0; color: #fff; font-size: 18px; }
+  .agent-terminal p { margin: 0; color: #aebec9; }
+  .agent-reveal {
+    border: 1px solid rgba(220, 233, 239, .14);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, .035);
+    overflow: hidden;
+  }
+  .agent-reveal summary {
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 12px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 800;
+    list-style: none;
+    cursor: pointer;
+  }
+  .agent-reveal summary::-webkit-details-marker { display: none; }
+  .agent-reveal summary::after {
+    content: "+";
+    color: #57d9e7;
+    font-size: 16px;
+  }
+  .agent-reveal[open] summary { border-bottom: 1px solid rgba(220, 233, 239, .14); }
+  .agent-reveal[open] summary::after { content: "-"; }
+  .terminal-lines {
+    display: grid;
+    gap: 8px;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: 10px;
+  }
+  .terminal-lines div {
+    border: 1px solid rgba(220, 233, 239, .12);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, .04);
+    padding: 10px;
+  }
+  .terminal-lines b { color: #57d9e7; font-weight: 760; }
+  .agent-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .agent-card {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    padding: 0;
+    overflow: hidden;
+  }
+  .agent-card summary {
+    min-height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 18px;
+    list-style: none;
+    cursor: pointer;
+  }
+  .agent-card summary::-webkit-details-marker { display: none; }
+  .agent-card h3 { margin: 0; font-size: 17px; }
+  .agent-card p { margin: 0; padding: 0 18px 18px; color: var(--muted); }
+  code { background: var(--paper-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+
+  footer {
+    margin-top: 76px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, .86);
+    color: var(--muted);
+    padding: 30px 0 46px;
+    font-size: 13px;
+  }
+  .footer-grid { display: flex; justify-content: space-between; gap: 28px; flex-wrap: wrap; }
+  footer strong { color: var(--ink); }
+  footer a { display: block; color: var(--muted); text-decoration: none; margin-top: 6px; }
+  footer a:hover { color: var(--accent-strong); }
+
+  @media (max-width: 940px) {
+    .links a:not(.btn) { display: none; }
+    .hero { padding-top: 50px; }
+    .hero-grid, .demo-grid { grid-template-columns: 1fr; }
+    .proof-strip, .workflow, .pricing { grid-template-columns: 1fr; }
+    .step + .step { border-left: 0; border-top: 1px solid var(--line); }
+    .section-head { display: block; }
+    .section-head p { margin-top: 12px; }
+  }
+  @media (max-width: 560px) {
+    .wrap { width: min(100% - 28px, 1180px); }
+    .bar { min-height: 58px; }
+    .brand { font-size: 13px; }
+    .links .btn { min-height: 36px; padding: 0 10px; }
+    .hero h1 { font-size: 38px; }
+    .fieldline, .mini-grid, .row, .agent-grid, .agent-cards, .console-meta { grid-template-columns: 1fr; }
+    .audit-rail { grid-template-columns: 1fr 1fr; }
+    .console-body, .panel, .plan { padding: 14px; }
+    .proof summary, .step summary, .agent-card summary { padding: 14px; }
+    .proof p, .step p, .agent-card p { padding: 0 14px 14px; }
+    .agent-terminal { padding: 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<nav aria-label="Primary">
+  <div class="wrap bar">
+      <a class="brand" href="#top" aria-label="Protected Inbox Audit home"><span class="brand-mark" aria-hidden="true"></span> Protected Inbox Audit</a>
+    <div class="links">
+      <a href="#risk-check">Risk check</a>
+      <a href="#proof">Proof</a>
+      <a href="#plans">Plans</a>
+      <a href="/docs">Docs</a>
+      <div class="theme-dial" role="group" aria-label="Mailbox brand theme">
+        <button type="button" class="dot active" data-theme="" title="Universal" aria-label="Universal theme"></button>
+        <button type="button" class="dot" data-theme="gmail" title="Gmail" aria-label="Gmail theme"></button>
+        <button type="button" class="dot" data-theme="outlook" title="Outlook" aria-label="Outlook theme"></button>
+        <button type="button" class="dot" data-theme="icloud" title="iCloud" aria-label="iCloud theme"></button>
+        <button type="button" class="dot" data-theme="imap" title="IMAP" aria-label="IMAP theme"></button>
+      </div>
+      <a class="btn btn-primary" href="#risk-check">Run risk check</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div>
+      <h1>Inbox risk first.</h1>
+      <p class="lede">Audit. Hold. Prove.</p>
+      <div class="ctas">
+        <a class="btn btn-primary" href="#risk-check">Run risk check</a>
+        <a class="btn btn-secondary" href="#proof">View audit proof</a>
+      </div>
+      <div class="hero-note" aria-label="Product guarantees">
+        <span><strong>Fail-closed</strong> gate</span>
+        <span><strong>Signed</strong> receipts</span>
+        <span><strong>Dry-run</strong> first</span>
+      </div>
+    </div>
+
+    <aside class="console" aria-label="Risk console preview">
+      <div class="console-top">
+        <div class="console-title">Risk console</div>
+        <div class="status-dot">Live</div>
+      </div>
+      <div class="console-body">
+        <div class="fieldline">
+          <div>
+            <label for="consoleSender">Sender under review</label>
+            <input id="consoleSender" value="clerk@courts.ca.gov" aria-label="Preview sender" readonly />
+          </div>
+          <a class="btn btn-secondary" href="#risk-check">Check</a>
+        </div>
+        <div class="mini-grid">
+          <div class="mini">
+            <span>Verdict</span>
+            <strong>Protected</strong>
+            <small>Held before action.</small>
+          </div>
+          <div class="mini">
+            <span>Receipt</span>
+            <strong>sha256</strong>
+            <small>Evidence attached.</small>
+          </div>
+        </div>
+        <div class="reveal-stack" aria-label="Layered audit details">
+          <details class="reveal">
+            <summary>Providers</summary>
+            <div class="reveal-body">
+              <div class="provider-row" role="group" aria-label="Supported providers — selecting one shifts the dashboard to that mailbox's brand theme">
+                <button type="button" class="provider active" data-theme="gmail">Gmail</button>
+                <button type="button" class="provider" data-theme="outlook">Outlook</button>
+                <button type="button" class="provider" data-theme="icloud">iCloud</button>
+                <button type="button" class="provider" data-theme="imap">IMAP</button>
+              </div>
+            </div>
+          </details>
+          <details class="reveal">
+            <summary>Audit state</summary>
+            <div class="reveal-body">
+              <div class="console-meta" aria-label="Audit state">
+                <div class="meta-cell">
+                  <span>Audit ID</span>
+                  <strong>7f3a9c2e</strong>
+                </div>
+                <div class="meta-cell">
+                  <span>Mode</span>
+                  <strong>Read-only</strong>
+                </div>
+                <div class="meta-cell">
+                  <span>Checks</span>
+                  <strong>12 / 50 today</strong>
+                </div>
+              </div>
+            </div>
+          </details>
+          <details class="reveal">
+            <summary>Counters</summary>
+            <div class="reveal-body">
+              <div class="audit-rail" aria-label="Audit proof counters">
+                <div class="rail-item ok">
+                  <span>Protected held</span>
+                  <strong>2</strong>
+                </div>
+                <div class="rail-item">
+                  <span>Would archive</span>
+                  <strong>1</strong>
+                </div>
+                <div class="rail-item ok">
+                  <span>Violations</span>
+                  <strong>0</strong>
+                </div>
+                <div class="rail-item ok">
+                  <span>Signature</span>
+                  <strong>verified</strong>
+                </div>
+              </div>
+            </div>
+          </details>
+          <details class="reveal">
+            <summary>Sample</summary>
+            <div class="reveal-body">
+              <div class="rows" aria-label="Triage preview rows">
+                <div class="preview-row"><span>Legal notice from courts.ca.gov</span><b class="tag ok">held</b></div>
+                <div class="preview-row"><span>Payment trail from stripe.com</span><b class="tag ok">held</b></div>
+                <div class="preview-row"><span>Promo digest from deals.example</span><b class="tag neutral">archive</b></div>
+              </div>
+            </div>
+          </details>
+          <details class="reveal">
+            <summary>Receipt hash</summary>
+            <div class="reveal-body">
+              <div class="receipt">receipt run_7c9e... protected_held=2 archived=1 violations=0 signature=sha256:5f4a...</div>
+            </div>
+          </details>
+        </div>
+      </div>
+    </aside>
+  </div>
+</header>
+
+<main id="main">
+  <section aria-label="Proof strip">
+    <div class="wrap proof-strip" id="proof">
+      <details class="proof">
+        <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M12 3 5 6v5c0 5 3.5 8.5 7 10 3.5-1.5 7-5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-5"/></svg><h3>Fail-closed</h3></summary>
+        <p>Protected mail stays in place when sender evidence is missing or high-risk.</p>
+      </details>
+      <details class="proof">
+        <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M7 3h8l4 4v17l-3-2-3 2-3-2-3 2-3-2V3Z"/><path d="M15 3v5h5"/><path d="M8 12h8M8 16h6"/></svg><h3>Signed receipt</h3></summary>
+        <p>Every run gets a checkable receipt.</p>
+      </details>
+      <details class="proof">
+        <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 7h16v12H4z"/><path d="m4 7 8 6 8-6"/><path d="M8 3h8"/></svg><h3>Providers</h3></summary>
+        <p>Gmail, Outlook, iCloud, IMAP.</p>
+      </details>
+      <details class="proof">
+        <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/><path d="M4 4h16v16H4z"/></svg><h3>Read-only</h3></summary>
+        <p>Audit first. Cleanup later.</p>
+      </details>
+    </div>
+  </section>
+
+  <section aria-labelledby="workflow-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="workflow-title">Risk to proof.</h2>
+        <p>Three steps. Reveal details only when needed.</p>
+      </div>
+      <div class="workflow">
+        <details class="step">
+          <summary><div class="step-num">01</div><h3>Check senders.</h3></summary>
+        <p>Find protected senders.</p>
+        </details>
+        <details class="step">
+          <summary><div class="step-num">02</div><h3>Preview moves.</h3></summary>
+          <p>See what would move.</p>
+        </details>
+        <details class="step">
+          <summary><div class="step-num">03</div><h3>Export proof.</h3></summary>
+          <p>Save verifiable proof.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section id="risk-check" aria-labelledby="risk-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="risk-title">Run risk check.</h2>
+        <p>Live API when served. Static fallback on file links.</p>
+      </div>
+      <div class="demo-grid">
+        <div class="panel">
+          <h3>Sender gate</h3>
+          <div class="stack">
+            <div>
+              <label for="sender">Sender email</label>
+              <input id="sender" type="text" placeholder="clerk@courts.ca.gov" value="clerk@courts.ca.gov" autocomplete="off" />
+            </div>
+            <div class="quick-picks" aria-label="Sender presets">
+              <button type="button" data-sender="clerk@courts.ca.gov">Gov sender</button>
+              <button type="button" data-sender="alerts@chase.com">Bank sender</button>
+              <button type="button" data-sender="newsletter@deals-promo.example">Newsletter</button>
+              <button type="button" data-sender="">Empty sender</button>
+            </div>
+            <div>
+              <label for="subject">Subject optional</label>
+              <input id="subject" type="text" placeholder="Notice of hearing" />
+            </div>
+            <button class="btn btn-primary" id="checkBtn" type="button">Check sender</button>
+          </div>
+          <div class="result" id="checkResult"></div>
+        </div>
+
+        <div class="panel">
+          <h3>Dry-run triage preview</h3>
+          <div class="stack">
+            <div class="row">
+              <div>
+                <label for="provider">Provider</label>
+                <select id="provider">
+                  <option value="gmail">Gmail</option>
+                  <option value="imap">IMAP</option>
+                  <option value="mailapp">Apple Mail</option>
+                  <option value="outlook">Outlook</option>
+                </select>
+              </div>
+              <div>
+                <label for="limit">Limit</label>
+                <input id="limit" type="number" min="1" max="1000" value="50" />
+              </div>
+            </div>
+            <div>
+              <label for="query">Query</label>
+              <input id="query" type="text" value="has:nouserlabels" />
+            </div>
+            <button class="btn btn-primary" id="previewBtn" type="button">Preview dry run</button>
+          </div>
+          <div class="result" id="previewResult"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="plans-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="plans-title">Plans stay simple.</h2>
+        <p>Safety is included. Scale reveals the rest.</p>
+      </div>
+      <div id="plans" class="pricing"><p class="meta">Loading plans...</p></div>
+      <div class="panel plans-foot">
+        <label for="email">Email for checkout and receipts</label>
+        <input id="email" type="email" placeholder="you@example.com" autocomplete="email" />
+        <div id="billingMsg"></div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="agents-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="agents-title">People + agents.</h2>
+        <p>One gate. Multiple surfaces.</p>
+      </div>
+      <div class="agent-grid">
+        <article class="agent-terminal">
+          <h3>Proof surface</h3>
+          <p>Preview first. Hold protected senders. Verify the run.</p>
+          <details class="agent-reveal">
+            <summary>Builders</summary>
+            <div class="terminal-lines" aria-label="Agent API proof examples">
+              <div><b>POST</b> /v1/senders/check -> protected: true, tier: 1</div>
+              <div><b>POST</b> /v1/triage/preview -> dry_run: true, violations: 0</div>
+              <div><b>GET</b> /v1/audit/run_7c9e -> signature: verified</div>
+            </div>
+          </details>
+          <details class="agent-reveal">
+            <summary>Commerce</summary>
+            <div class="terminal-lines" aria-label="Agent commerce examples">
+              <div><b>GET</b> /acp/feed.json -> credit packs and receipt policy</div>
+              <div><b>POST</b> /acp/checkout_sessions -> idempotent purchase</div>
+            </div>
+          </details>
+          <details class="agent-reveal">
+            <summary>Operators</summary>
+            <div class="terminal-lines" aria-label="Operator review examples">
+              <div><b>GET</b> /.well-known/agent.json -> capabilities</div>
+              <div><b>GET</b> /llms.txt -> prompt-safe product context</div>
+            </div>
+          </details>
+        </article>
+        <div class="agent-cards">
+          <details class="agent-card">
+            <summary><h3>MCP</h3></summary>
+            <p>Tools at <code>/mcp</code>. Local via <code>python -m mcp_server</code>.</p>
+          </details>
+          <details class="agent-card">
+            <summary><h3>ACP</h3></summary>
+            <p>Credit packs through <code>/acp/checkout_sessions</code>.</p>
+          </details>
+          <details class="agent-card">
+            <summary><h3>Discovery</h3></summary>
+          <p><a href="/.well-known/agent.json">agent.json</a>, <a href="/llms.txt">llms.txt</a>, <a href="/server.json">MCP registry</a>.</p>
+          </details>
+          <details class="agent-card">
+            <summary><h3>Receipts</h3></summary>
+            <p>Use <code>run_id</code>. Fetch <code>GET /v1/audit/{run_id}</code>.</p>
+          </details>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap footer-grid">
+    <div style="max-width: 44ch">
+      <strong>Universal Mail Automation</strong>
+      <p>Protected Inbox Audit for operators who need proof before cleanup, delegation, or automation.</p>
+    </div>
+    <div>
+      <strong>Product</strong>
+      <a href="#risk-check">Risk check</a>
+      <a href="#proof">Proof</a>
+      <a href="#plans">Plans</a>
+    </div>
+    <div>
+      <strong>Developers</strong>
+      <a href="/docs">API reference</a>
+      <a href="/mcp">MCP endpoint</a>
+      <a href="/health">Health</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const API_BASE = window.__MAIL_AUTOMATION_API_BASE__ || "";
+
+/* ── Provider brand theming ─────────────────────────────────────────
+   The dashboard shifts its accent identity in phase with the mailbox
+   provider being interfaced. Sources of truth, in order: explicit user
+   pick (nav dial / provider chips), the triage provider select, then
+   the persisted last choice. Empty theme = Universal. */
+const PROVIDER_THEMES = ["gmail", "outlook", "icloud", "imap"];
+const SELECT_TO_THEME = { gmail: "gmail", outlook: "outlook", mailapp: "icloud", imap: "imap" };
+const THEME_TO_SELECT = { gmail: "gmail", outlook: "outlook", icloud: "mailapp", imap: "imap" };
+let themeAnimTimer = null;
+
+function setProviderTheme(theme, opts) {
+  const animate = !opts || opts.animate !== false;
+  const root = document.documentElement;
+  theme = PROVIDER_THEMES.includes(theme) ? theme : "";
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (animate && !reduced) {
+    root.classList.add("theme-anim");
+    clearTimeout(themeAnimTimer);
+    themeAnimTimer = setTimeout(() => root.classList.remove("theme-anim"), 800);
+  }
+  if (theme) root.setAttribute("data-provider", theme);
+  else root.removeAttribute("data-provider");
+  try { localStorage.setItem("uma-provider-theme", theme); } catch (e) { /* private mode */ }
+  document.querySelectorAll("[data-theme]").forEach((el) => {
+    el.classList.toggle("active", (el.getAttribute("data-theme") || "") === theme);
+  });
+  const sel = $("provider");
+  if (sel && theme && THEME_TO_SELECT[theme]) sel.value = THEME_TO_SELECT[theme];
+}
+
+document.querySelectorAll("[data-theme]").forEach((el) => {
+  el.addEventListener("click", () => setProviderTheme(el.getAttribute("data-theme") || ""));
+});
+$("provider").addEventListener("change", (e) => {
+  setProviderTheme(SELECT_TO_THEME[e.target.value] || "");
+});
+(() => {
+  let saved = "";
+  try { saved = localStorage.getItem("uma-provider-theme") || ""; } catch (e) { /* private mode */ }
+  setProviderTheme(saved, { animate: false });
+})();
+
+const SAMPLE_PLANS = [
+  {
+    id: "free",
+    name: "Free / Self-host",
+    price_display: "$0",
+    monthly_run_cap: 50,
+    providers: "gmail",
+    blurb: "The full safety floor, free forever. Protected-sender gate plus independent audit receipt, single provider, unlimited dry-runs.",
+  },
+  {
+    id: "pro",
+    name: "Pro",
+    price_display: "$19/mo",
+    monthly_run_cap: 5000,
+    providers: "all",
+    blurb: "All four providers, scheduled triage, downloadable and 90-day retained signed receipts.",
+  },
+  {
+    id: "business",
+    name: "Business",
+    price_display: "$49/mo",
+    monthly_run_cap: null,
+    providers: "all",
+    blurb: "Unlimited runs, multi-mailbox, retained receipt history for compliance export, plus MCP and agent-commerce access.",
+  },
+];
+
+async function postJSON(path, body) {
+  try {
+    const r = await fetch(API_BASE + path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    let data = null;
+    try { data = await r.json(); } catch (e) { data = null; }
+    return { ok: r.ok, status: r.status, data };
+  } catch (e) {
+    return { ok: false, status: 0, data: null };
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+$("checkBtn").addEventListener("click", async () => {
+  const btn = $("checkBtn"), out = $("checkResult");
+  const sender = $("sender").value.trim();
+  if (!sender) { out.innerHTML = ""; return; }
+  btn.disabled = true;
+  out.innerHTML = '<p class="meta">Checking...</p>';
+  const { ok, status, data } = await postJSON("/v1/senders/check", { sender, subject: $("subject").value });
+  btn.disabled = false;
+  if (!ok || !data) {
+    out.innerHTML = `<div class="notice err">Cannot reach the API (${status}).</div>`;
+    return;
+  }
+  const payload = data;
+  const cat = payload.categorization || {};
+  const tier = cat.tier != null ? `tier ${cat.tier}` : "";
+  const label = cat.label ? `categorized as <strong>${escapeHtml(cat.label)}</strong>` : "";
+  const extra = [label, tier].filter(Boolean).join(" / ");
+  if (payload.protected) {
+    out.innerHTML = `<div class="verdict protected"><span class="icon" aria-hidden="true"></span> Protected. Held.</div>${extra ? `<div class="meta">${extra}</div>` : ""}`;
+  } else {
+    out.innerHTML = `<div class="verdict open"><span class="icon" aria-hidden="true"></span> Open. Eligible.</div>${extra ? `<div class="meta">${extra}</div>` : ""}`;
+  }
+});
+
+$("sender").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") $("checkBtn").click();
+});
+
+document.querySelectorAll(".quick-picks button[data-sender]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $("sender").value = btn.getAttribute("data-sender") || "";
+    $("checkBtn").click();
+  });
+});
+
+$("previewBtn").addEventListener("click", async () => {
+  const btn = $("previewBtn"), out = $("previewResult");
+  btn.disabled = true;
+  out.innerHTML = '<p class="meta">Previewing...</p>';
+  const { ok, status, data } = await postJSON("/v1/triage/preview", {
+    provider: $("provider").value, query: $("query").value, limit: parseInt($("limit").value, 10) || 50,
+  });
+  btn.disabled = false;
+  if (status === 503 || !ok || !data) {
+    out.innerHTML = `<div class="notice err">Cannot reach the API (${status}).</div>`;
+    return;
+  }
+  if (status === 500 && data && /SAFETY GATE/.test(data.detail || "")) {
+    out.innerHTML = `<div class="notice err">${escapeHtml(data.detail)}</div>`;
+    return;
+  }
+  const a = data.audit || {};
+  const viol = (a.violations || []).length;
+  out.innerHTML = `
+    <div class="receipt">${escapeHtml(data.receipt || "")}</div>
+    <table>
+      <tr><th>Disposition</th><th>Count</th></tr>
+      <tr><td>Protected - held in inbox</td><td class="held">${a.protected_held ?? 0}</td></tr>
+      <tr><td>Archived</td><td>${a.archived ?? 0}</td></tr>
+      <tr><td>Moved</td><td>${a.moved ?? 0}</td></tr>
+      <tr><td>Labeled</td><td>${a.labeled ?? 0}</td></tr>
+      <tr><td>Kept</td><td>${a.kept ?? 0}</td></tr>
+      <tr><td>Gate violations</td><td class="${viol ? "violations-bad" : "violations-ok"}">${viol ? viol : "0 - gate held"}</td></tr>
+    </table>`;
+});
+
+const PURCHASABLE = { pro: true, business: true };
+
+async function startCheckout(planId, btn) {
+  const msg = $("billingMsg");
+  const email = ($("email").value || "").trim();
+  msg.innerHTML = "";
+  if (!email || !/.+@.+\..+/.test(email)) {
+    msg.innerHTML = `<div class="notice warn">Enter your email above first.</div>`;
+    $("email").focus();
+    return;
+  }
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Redirecting...";
+  const { ok, status, data } = await postJSON("/v1/billing/checkout", { plan: planId, email });
+  if (ok && data && data.url) { window.location.href = data.url; return; }
+  btn.disabled = false;
+  btn.textContent = prev;
+  if (status === 503) {
+    msg.innerHTML = `<div class="notice warn">Billing is not live on this server yet. The plan, gate, and receipts work; only card checkout is pending setup.</div>`;
+  } else {
+    msg.innerHTML = `<div class="notice err">Could not start checkout (${status}). Try again shortly.</div>`;
+  }
+}
+
+function renderPlans(plans, staticCheckout) {
+  const out = $("plans");
+  out.innerHTML = "";
+  plans.forEach((p) => {
+    const cap = p.monthly_run_cap == null ? "Unlimited runs" : `${Number(p.monthly_run_cap).toLocaleString()} runs / mo`;
+    const card = document.createElement("div");
+    card.className = "plan" + (p.id === "pro" ? " feature" : "");
+    const buyable = PURCHASABLE[p.id];
+    card.innerHTML = `
+      <h3>${escapeHtml(p.name || p.id)}</h3>
+      <div class="price">${escapeHtml(p.price_display || "")}</div>
+      <details class="plan-reveal">
+        <summary>Details</summary>
+        <div class="plan-reveal-body">
+          <div class="blurb">${escapeHtml(p.blurb || "")}</div>
+          <ul>
+            <li>${escapeHtml(cap)}</li>
+            <li>Providers: ${escapeHtml(p.providers || "-")}</li>
+            <li>Gate and receipts</li>
+          </ul>
+        </div>
+      </details>`;
+    const btn = document.createElement("button");
+    btn.className = "btn " + (buyable ? "btn-primary" : "btn-secondary");
+    btn.textContent = buyable ? `Get ${p.name || p.id}` : "Start free";
+    if (buyable && !staticCheckout) {
+      btn.addEventListener("click", () => startCheckout(p.id, btn));
+    } else if (buyable) {
+      btn.addEventListener("click", () => {
+        $("billingMsg").innerHTML = `<div class="notice warn">This page is static. Connect a backend to start checkout.</div>`;
+        $("email").focus();
+      });
+    } else {
+      btn.addEventListener("click", () => { $("risk-check").scrollIntoView({ behavior: "smooth" }); });
+    }
+    card.appendChild(btn);
+    out.appendChild(card);
+  });
+  if (!plans.length) out.innerHTML = `<p class="meta">No plans available right now.</p>`;
+}
+
+(async () => {
+  try {
+    const r = await fetch(API_BASE + "/v1/billing/plans");
+    if (!r.ok) throw new Error(r.status);
+    const data = await r.json();
+    renderPlans(data.plans || [], false);
+  } catch (e) {
+    renderPlans(SAMPLE_PLANS, true);
+  }
+})();
+
+(function () {
+  const q = new URLSearchParams(location.search);
+  const b = q.get("billing");
+  if (!b) return;
+  const msg = $("billingMsg");
+  if (msg && b === "success") msg.innerHTML = `<div class="notice ok">Subscription active. Receipt retention is enabled.</div>`;
+  if (msg && b === "cancel") msg.innerHTML = `<div class="notice warn">Checkout canceled. No charge made.</div>`;
+  document.getElementById("plans-title").scrollIntoView();
+})();
+</script>
+</body>
+</html>
