@@ -145,6 +145,112 @@ def test_checkout_new_account_returns_generated_key(monkeypatch):
     assert fake.checkout_sessions.params["client_reference_id"] == body["account_id"]
 
 
+def test_checkout_rejects_offsite_success_url(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro_test")
+    fake = _Client()
+    monkeypatch.setattr(billing, "_client", lambda: fake)
+    acct = get_store().create_account(plan="free")
+
+    r = client.post(
+        "/v1/billing/checkout",
+        json={
+            "plan": "pro",
+            "account_id": acct["id"],
+            "success_url": "https://evil.example/phish",
+        },
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 400
+    # The bogus URL never reached Stripe.
+    assert fake.checkout_sessions.params is None
+
+
+def test_checkout_rejects_credentials_in_redirect(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro_test")
+    fake = _Client()
+    monkeypatch.setattr(billing, "_client", lambda: fake)
+    acct = get_store().create_account(plan="free")
+
+    # `testserver@evil.example` would pass a naive host check but navigates offsite.
+    r = client.post(
+        "/v1/billing/checkout",
+        json={
+            "plan": "pro",
+            "account_id": acct["id"],
+            "cancel_url": "https://testserver@evil.example/x",
+        },
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 400
+    assert fake.checkout_sessions.params is None
+
+
+def test_checkout_accepts_same_origin_redirect(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro_test")
+    fake = _Client()
+    monkeypatch.setattr(billing, "_client", lambda: fake)
+    acct = get_store().create_account(plan="free")
+
+    # TestClient's base_url host is "testserver" — a same-origin URL is allowed.
+    r = client.post(
+        "/v1/billing/checkout",
+        json={
+            "plan": "pro",
+            "account_id": acct["id"],
+            "success_url": "http://testserver/app/?billing=done",
+        },
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 200
+    assert fake.checkout_sessions.params["success_url"] == (
+        "http://testserver/app/?billing=done"
+    )
+
+
+def test_checkout_honors_allowlisted_redirect_host(monkeypatch):
+    monkeypatch.setenv("STRIPE_PRICE_PRO", "price_pro_test")
+    monkeypatch.setenv("UMA_ALLOWED_REDIRECT_HOSTS", "uma.4444j99.dev")
+    fake = _Client()
+    monkeypatch.setattr(billing, "_client", lambda: fake)
+    acct = get_store().create_account(plan="free")
+
+    r = client.post(
+        "/v1/billing/checkout",
+        json={
+            "plan": "pro",
+            "account_id": acct["id"],
+            "success_url": "https://uma.4444j99.dev/app/?billing=done",
+        },
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 200
+    assert fake.checkout_sessions.params["success_url"] == (
+        "https://uma.4444j99.dev/app/?billing=done"
+    )
+
+
+def test_portal_rejects_offsite_return_url(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+    fake = _Client()
+    monkeypatch.setattr(billing, "_client", lambda: fake)
+    store = get_store()
+    acct = store.create_account(plan="pro")
+    store.link_customer(acct["id"], "cus_owned")
+
+    r = client.post(
+        "/v1/billing/portal",
+        json={"account_id": acct["id"], "return_url": "https://evil.example/x"},
+        headers={"Authorization": f"Bearer {acct['api_key']}"},
+    )
+
+    assert r.status_code == 400
+    assert fake.portal_sessions.params is None
+
+
 def test_portal_requires_bearer_even_with_customer_id(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
 
