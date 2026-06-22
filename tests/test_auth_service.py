@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+pytest.importorskip("cryptography")
+
 from auth.service import TokenizedSecretStore, connect, generate_master_key
 
 

@@ -1,5 +1,9 @@
 """Tests for signed receipts + the GET /v1/audit/{run_id} endpoint."""
 
+import pytest
+
+pytest.importorskip("fastapi")
+
 from fastapi.testclient import TestClient
 
 from api import receipts, service

@@ -1,5 +1,9 @@
 """Tests for account API-key issuance and verification endpoints."""
 
+import pytest
+
+pytest.importorskip("fastapi")
+
 from fastapi.testclient import TestClient
 
 from api.auth import ISSUER_TOKEN_ENV

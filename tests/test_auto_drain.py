@@ -8,6 +8,10 @@ batchModify, and a dry run is exactly ONE analysis pass (it cannot loop,
 because nothing it does can empty the source bucket).
 """
 
+import pytest
+
+pytest.importorskip("googleapiclient")
+
 import auto_drain
 
 

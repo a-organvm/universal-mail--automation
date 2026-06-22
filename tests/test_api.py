@@ -1,5 +1,9 @@
 """API tests, including the fail-closed safety invariant at the HTTP boundary."""
 
+import pytest
+
+pytest.importorskip("fastapi")
+
 from fastapi.testclient import TestClient
 
 from api import metering, service
