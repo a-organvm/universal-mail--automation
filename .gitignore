@@ -3,12 +3,6 @@ credentials.json
 token.pickle
 client_secret_*.json
 
-# Runtime env files for deploys (provider/Stripe credentials) — never commit.
-# DEPLOY.md / scripts/deploy.sh pass these to the container via --env-file.
-prod.env
-*.env
-!*.env.example
-
 # Local protected-sender list (PII: real lawyer/banks/gov/self) — never commit.
 # Use config/protected_senders.example.txt as the template.
 config/protected_senders.local.txt

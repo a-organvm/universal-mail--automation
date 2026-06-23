@@ -4,49 +4,6 @@ The service is a single FastAPI app (API at `/v1/*`, dashboard at `/app`, health
 `/health`). It ships as a `Dockerfile` that honors a platform-provided `$PORT`, so it
 runs unchanged on any container host.
 
-## One command
-
-```bash
-make deploy            # or: bash scripts/deploy.sh docker
-```
-
-This builds the image, runs it locally on `$PORT` (default 8000), waits for it to go
-healthy, and smoke-tests the credential-free endpoints. When it's done it prints the
-dashboard URL (`http://127.0.0.1:8000/app`). No mailbox credentials are required for
-this — the gate/pricing/dashboard surfaces are demoable immediately.
-
-`bash scripts/deploy.sh` takes a target:
-
-| Command | What it does |
-|---|---|
-| `bash scripts/deploy.sh docker` (default) | Build + run locally, then smoke-test. |
-| `bash scripts/deploy.sh image` | Build and push to a registry: `IMAGE=ghcr.io/<owner>/<repo>:latest bash scripts/deploy.sh image`. |
-| `bash scripts/deploy.sh cloudflare` | Deploy the read-only demo Worker (needs `CLOUDFLARE_API_TOKEN`). |
-| `bash scripts/deploy.sh render` | Trigger a Render deploy via `RENDER_DEPLOY_HOOK`, or print blueprint setup steps. |
-| `bash scripts/deploy.sh help` | Usage. |
-
-`make` shortcuts: `make deploy`, `make deploy-image`, `make deploy-cloudflare`,
-`make deploy-render`, `make docker-build`.
-
-### Continuous deploy (GitHub Actions)
-
-`.github/workflows/deploy.yml` builds the image, smoke-tests it in-runner, and
-publishes it to the GitHub Container Registry (GHCR):
-
-- **push a `v*` tag** → publishes `ghcr.io/<owner>/<repo>:vX.Y.Z` + `:latest`
-- **push to `main`** → publishes `:edge` and `:sha-<short>`
-- **manual run** (Actions → Deploy → Run workflow) → builds + smoke-tests; publishes
-  only when you tick **push**
-
-Pull and run the published image on any host:
-
-```bash
-docker run -p 8000:8000 --env-file prod.env ghcr.io/<owner>/<repo>:latest
-```
-
-(The separate `cloudflare-share-deploy` job in `ci.yml` only ships the read-only demo
-Worker — this workflow ships the real FastAPI app.)
-
 ## Local
 
 ```bash
@@ -99,7 +56,6 @@ money/charge endpoints return a clean `503 billing is not configured`.
 | Surface | Endpoint(s) | Secret(s) needed |
 |---|---|---|
 | Pricing catalog | `GET /v1/billing/plans` | none |
-| Account API-key issuance | `POST /v1/auth/api-keys` | `UMA_API_KEY_ISSUER_TOKEN` (`MAIL_DB_PATH` stores issued keys; default `data/app.db`) |
 | Subscription checkout | `POST /v1/billing/checkout` | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_BUSINESS` |
 | Customer portal | `POST /v1/billing/portal` | `STRIPE_SECRET_KEY` |
 | Stripe webhook | `POST /v1/billing/webhook` | `STRIPE_WEBHOOK_SECRET` |

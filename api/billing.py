@@ -33,7 +33,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from api import metering, plans
+from api import plans
 from api.auth import authorized_account, require_authorized_account
 from api.store import get_store
 
@@ -148,77 +148,6 @@ def list_plans() -> dict:
         "credit_packs": list(plans.CREDIT_PACKS.values()),
         "currency": "usd",
     }
-
-
-# Below this fraction of the monthly cap consumed we don't nudge; at or above it we
-# surface the next paid tier so the dashboard can prompt an upgrade before the cap
-# is hit and a live run is refused (402). This is the conversion signal.
-_UPGRADE_NUDGE_FRACTION = 0.8
-
-
-def _next_paid_plan(current_plan_id: str) -> Optional[dict]:
-    """The next purchasable tier above the current plan, or None at the top.
-
-    Drives the dashboard's upgrade prompt. Ordered by monthly price so it stays
-    correct if the catalog gains tiers; unlimited (Business) has nowhere to go."""
-    current = plans.plan_for(current_plan_id)
-    if current.monthly_run_cap is plans.UNLIMITED:
-        return None
-    upgrades = sorted(
-        (p for p in plans.PLANS.values()
-         if p.id in ("pro", "business") and p.price_cents > current.price_cents),
-        key=lambda p: p.price_cents,
-    )
-    if not upgrades:
-        return None
-    nxt = upgrades[0]
-    return {"id": nxt.id, "name": nxt.name, "price_display": nxt.price_display}
-
-
-@router.get("/v1/billing/usage")
-def usage(request: Request) -> dict:
-    """Authenticated usage snapshot: plan, runs consumed this period, and headroom.
-
-    The plan/cap are already visible via /v1/auth/verify; this adds the *consumed*
-    side — live runs used this period, runs remaining (monthly allowance + prepaid
-    credits), and an upgrade hint when the cap is nearly or fully spent. It's the
-    signal a customer (or the dashboard) acts on to upgrade before runs are refused.
-    """
-    account = require_authorized_account(request)
-    store = get_store()
-    entitlements = plans.entitlements_for(account)
-    period = metering.current_period_key()
-    used = store.get_usage_count(account["id"], period)
-    cap = entitlements["monthly_run_cap"]
-    credits = int(entitlements.get("run_credits", 0))
-
-    unlimited = cap is plans.UNLIMITED
-    monthly_remaining = None if unlimited else max(0, int(cap) - used)
-    # Total headroom = remaining monthly allowance plus any prepaid credits.
-    total_remaining = None if unlimited else monthly_remaining + credits
-    at_limit = (not unlimited) and monthly_remaining == 0 and credits == 0
-    near_limit = (not unlimited) and cap and used >= int(cap) * _UPGRADE_NUDGE_FRACTION
-
-    body = {
-        "account_id": account["id"],
-        "plan": entitlements["plan"],
-        "status": account.get("status") or "active",
-        "period": period,
-        "live_runs_used": used,
-        "monthly_run_cap": cap,
-        "monthly_runs_remaining": monthly_remaining,
-        "run_credits": credits,
-        "runs_remaining": total_remaining,
-        "unlimited": unlimited,
-        "providers": entitlements["providers"],
-        "retained_receipt_days": entitlements["retained_receipt_days"],
-        "current_period_end": account.get("current_period_end"),
-        "near_limit": near_limit,
-        "at_limit": at_limit,
-    }
-    if near_limit or at_limit:
-        body["upgrade"] = _next_paid_plan(entitlements["plan"])
-    return body
 
 
 @router.post("/v1/billing/checkout")

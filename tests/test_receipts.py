@@ -1,14 +1,9 @@
 """Tests for signed receipts + the GET /v1/audit/{run_id} endpoint."""
 
-import pytest
-
-pytest.importorskip("fastapi")
-
 from fastapi.testclient import TestClient
 
 from api import receipts, service
 from api.app import app
-from api.store import get_store
 
 client = TestClient(app)
 
@@ -43,13 +38,8 @@ def test_triage_persists_retrievable_signed_receipt(monkeypatch):
 
     monkeypatch.setattr(service, "run_labeler", _fake_run_labeler)
     monkeypatch.setattr(service, "get_provider", lambda *a, **k: _FakeProvider())
-    acct = get_store().create_account(plan="free")
 
-    r = client.post(
-        "/v1/triage/preview",
-        json={"provider": "fake"},
-        headers={"Authorization": f"Bearer {acct['api_key']}"},
-    )
+    r = client.post("/v1/triage/preview", json={"provider": "fake"})
     assert r.status_code == 200
     run_id = r.json()["run_id"]
     assert run_id and run_id.startswith("run_")

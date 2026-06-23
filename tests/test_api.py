@@ -1,9 +1,5 @@
 """API tests, including the fail-closed safety invariant at the HTTP boundary."""
 
-import pytest
-
-pytest.importorskip("fastapi")
-
 from fastapi.testclient import TestClient
 
 from api import metering, service
@@ -13,11 +9,6 @@ from core.models import EmailMessage
 from providers.base import ListMessagesResult, ProviderCapabilities
 
 client = TestClient(app)
-
-
-def _auth_headers(account=None):
-    account = account or get_store().create_account(plan="free")
-    return {"Authorization": f"Bearer {account['api_key']}"}
 
 
 def test_health():
@@ -157,11 +148,7 @@ def test_triage_clean_run_summary(monkeypatch):
     monkeypatch.setattr(service, "run_labeler", _fake_run_labeler)
     monkeypatch.setattr(service, "get_provider", lambda *a, **k: _FakeProvider())
 
-    r = client.post(
-        "/v1/triage/preview",
-        json={"provider": "fake"},
-        headers=_auth_headers(),
-    )
+    r = client.post("/v1/triage/preview", json={"provider": "fake"})
     assert r.status_code == 200
     body = r.json()
     assert body["dry_run"] is True
@@ -177,11 +164,7 @@ def test_triage_preview_reports_would_archive_for_archivable_message(monkeypatch
     monkeypatch.setattr(cli.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(service, "get_provider", lambda *a, **k: _DryRunProvider())
 
-    r = client.post(
-        "/v1/triage/preview",
-        json={"provider": "fake", "limit": 1},
-        headers=_auth_headers(),
-    )
+    r = client.post("/v1/triage/preview", json={"provider": "fake", "limit": 1})
 
     assert r.status_code == 200
     body = r.json()
@@ -203,22 +186,14 @@ def test_triage_provider_unavailable(monkeypatch):
             pass
 
     monkeypatch.setattr(service, "get_provider", lambda *a, **k: _BadProvider())
-    r = client.post(
-        "/v1/triage",
-        json={"provider": "bad", "dry_run": True},
-        headers=_auth_headers(),
-    )
+    r = client.post("/v1/triage", json={"provider": "bad", "dry_run": True})
     assert r.status_code == 503
 
 
 def test_triage_unknown_provider_is_503_not_500():
     """An unknown provider (factory raises ValueError) must map to a clean 503,
     not an unhandled 500, and must not echo the raw input back to the client."""
-    r = client.post(
-        "/v1/triage",
-        json={"provider": "definitely-not-a-provider"},
-        headers=_auth_headers(),
-    )
+    r = client.post("/v1/triage", json={"provider": "definitely-not-a-provider"})
     assert r.status_code == 503
     # The generic message must not contain the raw provider string.
     assert "definitely-not-a-provider" not in r.json()["detail"]
@@ -241,11 +216,7 @@ def test_triage_provider_error_detail_not_leaked(monkeypatch):
             pass
 
     monkeypatch.setattr(service, "get_provider", lambda *a, **k: _LeakyProvider())
-    r = client.post(
-        "/v1/triage",
-        json={"provider": "leaky", "dry_run": True},
-        headers=_auth_headers(),
-    )
+    r = client.post("/v1/triage", json={"provider": "leaky", "dry_run": True})
     assert r.status_code == 503
     detail = r.json()["detail"]
     assert "/Users/secret" not in detail
@@ -274,21 +245,6 @@ def test_live_triage_requires_account_bearer(monkeypatch):
     monkeypatch.setattr(service, "run_triage", _run)
 
     r = client.post("/v1/triage", json={"provider": "fake", "dry_run": False})
-
-    assert r.status_code == 401
-    assert called["run"] is False
-
-
-def test_triage_preview_requires_account_bearer(monkeypatch):
-    called = {"run": False}
-
-    def _run(**_kwargs):
-        called["run"] = True
-        return _clean_triage_result()
-
-    monkeypatch.setattr(service, "run_triage", _run)
-
-    r = client.post("/v1/triage/preview", json={"provider": "fake"})
 
     assert r.status_code == 401
     assert called["run"] is False

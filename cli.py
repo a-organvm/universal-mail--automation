@@ -23,7 +23,6 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from core.audit import AuditLog
 
-from core import __version__
 from core.rules import (
     LABEL_RULES,
     PRIORITY_LABELS,
@@ -43,7 +42,6 @@ from core.rules import (
 from core.state import StateManager
 from core.models import LabelAction, ProcessingResult
 from core.config import load_config, apply_vip_senders_from_config
-from core.license import License, LicenseError, load_license_from_env
 from providers.base import EmailProvider, ProviderCapabilities
 
 # Logging setup
@@ -138,54 +136,6 @@ def get_provider(
         raise ValueError(f"Unknown provider: {provider_name}")
 
 
-def _provider_from_args(args: argparse.Namespace) -> EmailProvider:
-    """Construct the provider configured by the shared provider CLI flags."""
-    return get_provider(
-        args.provider,
-        host=args.host,
-        user=args.user,
-        password=args.password,  # allow-secret
-        account=args.account,
-        use_gmail_extensions=args.gmail_extensions,
-    )
-
-
-def _fetch_details(provider: EmailProvider, messages) -> dict:
-    """Fetch full message details, preferring the provider's batch API."""
-    if hasattr(provider, "batch_get_details"):
-        return provider.batch_get_details([m.id for m in messages])
-    return {m.id: provider.get_message_details(m.id) for m in messages}
-
-
-def _load_vip_config() -> None:
-    """Load config and register its VIP senders into the shared rules."""
-    apply_vip_senders_from_config(load_config())
-
-
-def enforce_cli_license(args: argparse.Namespace, lic: License) -> None:
-    """Apply license entitlements before any provider is constructed."""
-    provider = getattr(args, "provider", "gmail")
-    allowed_providers = lic.allowed_providers
-    if allowed_providers is not None and provider not in allowed_providers:
-        raise LicenseError(
-            f"{lic.tier} tier only includes Gmail; "
-            f"'{provider}' requires a pro license"
-        )
-
-    cap = lic.daily_message_cap
-    requested_limit = getattr(args, "limit", None)
-    if cap is not None and requested_limit is not None and requested_limit > cap:
-        logger.warning(
-            "%s tier caps CLI processing at %s messages/day; reducing "
-            "--limit from %s to %s.",
-            lic.tier,
-            cap,
-            requested_limit,
-            cap,
-        )
-        args.limit = cap
-
-
 def run_labeler(
     provider: EmailProvider,
     query: str,
@@ -244,7 +194,11 @@ def run_labeler(
                 break
 
             # Get message details
-            details = _fetch_details(provider, list_result.messages)
+            msg_ids = [m.id for m in list_result.messages]
+            if hasattr(provider, 'batch_get_details'):
+                details = provider.batch_get_details(msg_ids)
+            else:
+                details = {m.id: provider.get_message_details(m.id) for m in list_result.messages}
 
             # Categorize and prepare actions
             actions = []
@@ -464,8 +418,18 @@ def _report_audit(audit: "Optional[AuditLog]") -> bool:
 
 def cmd_label(args: argparse.Namespace) -> int:
     """Handle the 'label' subcommand."""
-    _load_vip_config()
-    provider = _provider_from_args(args)
+    # Load config and apply VIP senders
+    config = load_config()
+    apply_vip_senders_from_config(config)
+
+    provider = get_provider(
+        args.provider,
+        host=args.host,
+        user=args.user,
+        password=args.password,  # allow-secret
+        account=args.account,
+        use_gmail_extensions=args.gmail_extensions,
+    )
 
     # Trust receipt: on an APPLY run, record every post-gate disposition to an
     # append-only JSONL so the protected-sender guarantee is provable, not implicit.
@@ -495,7 +459,14 @@ def cmd_label(args: argparse.Namespace) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     """Handle the 'report' subcommand."""
-    provider = _provider_from_args(args)
+    provider = get_provider(
+        args.provider,
+        host=args.host,
+        user=args.user,
+        password=args.password,  # allow-secret
+        account=args.account,
+        use_gmail_extensions=args.gmail_extensions,
+    )
 
     print(f"# Email Report - {provider.name}")
     print(f"Capabilities: {provider.capabilities}")
@@ -520,7 +491,14 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def cmd_health(args: argparse.Namespace) -> int:
     """Handle the 'health' subcommand."""
-    provider = _provider_from_args(args)
+    provider = get_provider(
+        args.provider,
+        host=args.host,
+        user=args.user,
+        password=args.password,  # allow-secret
+        account=args.account,
+        use_gmail_extensions=args.gmail_extensions,
+    )
 
     print(f"Checking {provider.name} health...")
     try:
@@ -541,8 +519,18 @@ def cmd_health(args: argparse.Namespace) -> int:
 
 def cmd_summary(args: argparse.Namespace) -> int:
     """Handle the 'summary' subcommand - email summary by tier."""
-    _load_vip_config()
-    provider = _provider_from_args(args)
+    # Load config and apply VIP senders
+    config = load_config()
+    apply_vip_senders_from_config(config)
+
+    provider = get_provider(
+        args.provider,
+        host=args.host,
+        user=args.user,
+        password=args.password,  # allow-secret
+        account=args.account,
+        use_gmail_extensions=args.gmail_extensions,
+    )
 
     tier_counts = {1: 0, 2: 0, 3: 0, 4: 0}
     vip_count = 0
@@ -561,7 +549,11 @@ def cmd_summary(args: argparse.Namespace) -> int:
             print("No messages found.")
             return 0
 
-        details = _fetch_details(provider, list_result.messages)
+        msg_ids = [m.id for m in list_result.messages]
+        if hasattr(provider, 'batch_get_details'):
+            details = provider.batch_get_details(msg_ids)
+        else:
+            details = {m.id: provider.get_message_details(m.id) for m in list_result.messages}
 
         for msg_id, msg in details.items():
             if not msg:
@@ -629,7 +621,14 @@ def cmd_summary(args: argparse.Namespace) -> int:
 
 def cmd_pending(args: argparse.Namespace) -> int:
     """Handle the 'pending' subcommand - list flagged/due items."""
-    provider = _provider_from_args(args)
+    provider = get_provider(
+        args.provider,
+        host=args.host,
+        user=args.user,
+        password=args.password,  # allow-secret
+        account=args.account,
+        use_gmail_extensions=args.gmail_extensions,
+    )
 
     logger.info(f"Listing pending items (provider: {provider.name})")
 
@@ -653,7 +652,11 @@ def cmd_pending(args: argparse.Namespace) -> int:
             print("No pending items found.")
             return 0
 
-        details = _fetch_details(provider, list_result.messages)
+        msg_ids = [m.id for m in list_result.messages]
+        if hasattr(provider, 'batch_get_details'):
+            details = provider.batch_get_details(msg_ids)
+        else:
+            details = {m.id: provider.get_message_details(m.id) for m in list_result.messages}
 
         for msg_id, msg in details.items():
             if not msg:
@@ -711,7 +714,9 @@ def cmd_pending(args: argparse.Namespace) -> int:
 
 def cmd_vip(args: argparse.Namespace) -> int:
     """Handle the 'vip' subcommand - show VIP sender activity."""
-    _load_vip_config()
+    # Load config and apply VIP senders
+    config = load_config()
+    apply_vip_senders_from_config(config)
 
     from core.rules import get_vip_senders
 
@@ -722,7 +727,14 @@ def cmd_vip(args: argparse.Namespace) -> int:
         print("Add VIP senders to ~/.config/mail_automation/config.yaml")
         return 0
 
-    provider = _provider_from_args(args)
+    provider = get_provider(
+        args.provider,
+        host=args.host,
+        user=args.user,
+        password=args.password,  # allow-secret
+        account=args.account,
+        use_gmail_extensions=args.gmail_extensions,
+    )
 
     vip_activity = {key: {"config": vip, "messages": []} for key, vip in vip_senders.items()}
 
@@ -735,7 +747,11 @@ def cmd_vip(args: argparse.Namespace) -> int:
         )
 
         if list_result.messages:
-            details = _fetch_details(provider, list_result.messages)
+            msg_ids = [m.id for m in list_result.messages]
+            if hasattr(provider, 'batch_get_details'):
+                details = provider.batch_get_details(msg_ids)
+            else:
+                details = {m.id: provider.get_message_details(m.id) for m in list_result.messages}
 
             for msg_id, msg in details.items():
                 if not msg:
@@ -808,8 +824,18 @@ def cmd_vip(args: argparse.Namespace) -> int:
 
 def cmd_escalate(args: argparse.Namespace) -> int:
     """Handle the 'escalate' subcommand - re-triage emails based on age."""
-    _load_vip_config()
-    provider = _provider_from_args(args)
+    # Load config and apply VIP senders
+    config = load_config()
+    apply_vip_senders_from_config(config)
+
+    provider = get_provider(
+        args.provider,
+        host=args.host,
+        user=args.user,
+        password=args.password,  # allow-secret
+        account=args.account,
+        use_gmail_extensions=args.gmail_extensions,
+    )
 
     has_categories = provider.capabilities & ProviderCapabilities.CATEGORIES
     # Trust receipt on the escalate path too: escalate only raises tier today, but
@@ -837,7 +863,11 @@ def cmd_escalate(args: argparse.Namespace) -> int:
             return 0
 
         # Get message details
-        details = _fetch_details(provider, list_result.messages)
+        msg_ids = [m.id for m in list_result.messages]
+        if hasattr(provider, 'batch_get_details'):
+            details = provider.batch_get_details(msg_ids)
+        else:
+            details = {m.id: provider.get_message_details(m.id) for m in list_result.messages}
 
         actions = []
         for msg_id, msg in details.items():
@@ -928,8 +958,17 @@ def cmd_triage(args: argparse.Namespace) -> int:
     from core.triage import triage_messages, render_triage
     from core.voice import load_voice_profile
 
-    _load_vip_config()
-    provider = _provider_from_args(args)
+    config = load_config()
+    apply_vip_senders_from_config(config)
+
+    provider = get_provider(
+        args.provider,
+        host=args.host,
+        user=args.user,
+        password=args.password,  # allow-secret
+        account=args.account,
+        use_gmail_extensions=args.gmail_extensions,
+    )
 
     voice = None
     if args.draft:
@@ -947,7 +986,12 @@ def cmd_triage(args: argparse.Namespace) -> int:
             print("No messages found.")
             return 0
 
-        details = _fetch_details(provider, list_result.messages)
+        msg_ids = [m.id for m in list_result.messages]
+        if hasattr(provider, "batch_get_details"):
+            details = provider.batch_get_details(msg_ids)
+        else:
+            details = {m.id: provider.get_message_details(m.id) for m in list_result.messages}
+
         messages = [m for m in details.values() if m]
 
     # Bodies are sourced from whatever the provider populated (snippet/body);
@@ -986,12 +1030,6 @@ Examples:
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose logging",
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {__version__}",
-        help="Show the installed version and exit",
     )
 
     # Provider options (shared across subcommands)
@@ -1270,12 +1308,6 @@ Examples:
     if not args.command:
         parser.print_help()
         return 1
-
-    try:
-        enforce_cli_license(args, load_license_from_env())
-    except LicenseError as e:
-        print(f"License error: {e}", file=sys.stderr)
-        return 2
 
     return args.func(args)
 
