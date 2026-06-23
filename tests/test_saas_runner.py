@@ -8,6 +8,7 @@ by path is deterministic and order-independent.
 
 import importlib.util
 import os
+import sys
 
 import pytest
 
@@ -16,6 +17,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SAAS_PATH = os.path.join(_REPO_ROOT, "platform", "saas_runner.py")
 _spec = importlib.util.spec_from_file_location("umail_saas_runner", _SAAS_PATH)
 saas = importlib.util.module_from_spec(_spec)
+sys.modules["umail_saas_runner"] = saas
 _spec.loader.exec_module(saas)
 
 from api import metering, service  # noqa: E402
