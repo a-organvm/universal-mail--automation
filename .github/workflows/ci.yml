@@ -1,16 +1,26 @@
-name: Python CI
+name: CI
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [main]
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  python:
+    name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
 
@@ -22,64 +32,123 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            requirements-api.txt
+            requirements-mcp.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-api.txt -r requirements-mcp.txt
-          pip install pytest pytest-cov ruff mypy
+          python -m pip install -r requirements.txt -r requirements-api.txt -r requirements-mcp.txt
+          python -m pip install pytest pytest-cov ruff
 
-      - name: Lint with ruff
-        run: |
-          set +e
-          ruff check . | tee ruff.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            {
-              echo "## Ruff advisory findings"
-              echo
-              echo '```text'
-              cat ruff.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning::Ruff advisory check found issues; pytest remains the hard gate."
-          fi
+      - name: Lint Python
+        run: python -m ruff check --select E9,F63,F7,F82 .
 
-      - name: Type check with mypy
-        run: |
-          set +e
-          mypy . --ignore-missing-imports | tee mypy.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            {
-              echo "## Mypy advisory findings"
-              echo
-              echo '```text'
-              cat mypy.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning::Mypy advisory check found issues; pytest remains the hard gate."
-          fi
-
-      - name: Test with pytest
-        run: |
-          pytest --cov=. --cov-report=xml --cov-report=term
+      - name: Test Python
+        run: python -m pytest --cov=. --cov-report=xml --cov-report=term
 
       - name: Upload coverage to Codecov
-        if: success() && hashFiles('coverage.xml') != ''
+        if: matrix.python-version == '3.12' && hashFiles('coverage.xml') != ''
         uses: codecov/codecov-action@v7
         with:
           file: ./coverage.xml
           fail_ci_if_error: false
-          flags: unittests
-          name: codecov-${{ matrix.python-version }}
+          flags: python
+          name: python-${{ matrix.python-version }}
+
+  python-package:
+    name: Python package build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Verify metadata
+        run: python -m twine check dist/*
+
+      - name: Smoke-test wheel
+        run: |
+          python -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/pip install "$(ls dist/*.whl)"
+          /tmp/wheeltest/bin/umail --version
+          /tmp/wheeltest/bin/python -c "import core; print('core', core.__version__)"
+
+  web:
+    name: Web lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint web
+        run: npm run lint -- --max-warnings=0
+
+      - name: Build web
+        run: npm run build
+
+      - name: Upload static web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-static
+          path: web/out
+          if-no-files-found: error
+
+  cloudflare-worker:
+    name: Cloudflare Worker tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Test Worker
+        run: node --test cloudflare/worker.test.mjs
 
   cloudflare-share-deploy:
     name: Deploy Cloudflare share demo
     runs-on: ubuntu-latest
     timeout-minutes: 12
-    needs: test
+    needs: [python, python-package, web, cloudflare-worker]
     if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -87,6 +156,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Download static web build
+        uses: actions/download-artifact@v4
+        with:
+          name: web-static
+          path: web/out
 
       - name: Check deploy credentials
         id: deploy_credentials
@@ -109,11 +184,22 @@ jobs:
 
       - name: Smoke test live share demo
         if: steps.deploy_credentials.outputs.available == 'true'
-        timeout-minutes: 2
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           base="https://uma.4444j99.dev"
-          curl -fsS "$base/health" | grep -q '"status":"ok"'
+
+          for i in $(seq 1 12); do
+            if curl -fsS "$base/health" | grep -q '"status":"ok"'; then
+              break
+            fi
+            if [ "$i" = "12" ]; then
+              echo "::error::live share demo did not become healthy" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
           curl -fsS "$base/app/" >/dev/null
           curl -fsS "$base/v1/billing/plans" | grep -q '"plans"'
           curl -fsS \

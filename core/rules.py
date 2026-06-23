@@ -7,6 +7,7 @@ and categorization functions used across all email providers.
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parseaddr
 from typing import Dict, List, Any, Optional, Tuple
@@ -1183,7 +1184,7 @@ def escalate_by_age(
     )
 
 
-def calculate_email_age_hours(email_date: Optional["datetime"]) -> float:
+def calculate_email_age_hours(email_date: Optional[datetime]) -> float:
     """
     Calculate the age of an email in hours.
 
@@ -1195,8 +1196,6 @@ def calculate_email_age_hours(email_date: Optional["datetime"]) -> float:
     """
     if email_date is None:
         return 0
-
-    from datetime import datetime, timezone
 
     # Ensure we compare timezone-aware datetimes
     now = datetime.now(timezone.utc)
