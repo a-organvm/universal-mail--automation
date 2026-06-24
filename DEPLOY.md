@@ -84,3 +84,12 @@ Multi-tenant auth (customers connect their **own** mailbox via OAuth) and the MC
 OAuth 2.1 Resource Server (`/.well-known/oauth-protected-resource`) are the next
 bricks — both are credential-gated on registering OAuth apps. See the product
 roadmap in `docs/plans/`.
+
+## Remaining before production hardening
+
+- Set host/runtime secrets in your deployment target: provider credentials and
+  the billing/receipt envs (`STRIPE_SECRET_KEY`, `STRIPE_PRICE_*`,
+  `STRIPE_WEBHOOK_SECRET`, `RECEIPT_SIGNING_KEY`).
+- Set `MCP_ALLOWED_HOSTS` to the deployed hostname before enabling `/mcp`.
+- For Cloudflare share deployments, refresh `web` assets before deploy and
+  treat the worker as a review/demo surface, not the canonical backend.

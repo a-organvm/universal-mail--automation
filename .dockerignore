@@ -1,0 +1,32 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local dependencies and build tooling
+venv/
+env/
+.venv/
+node_modules/
+web/node_modules/
+
+# Local state, logs, and secrets
+*.log
+gmail_labeler.log
+labeler_state.json
+audit/
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Generated and local-only metadata
+mail_export.tsv
+mail_report.md
+universal_mail_automation.egg-info/
+.coverage
+coverage.xml
+
+# Tooling / local agent metadata
+.claude/
+.cache/
