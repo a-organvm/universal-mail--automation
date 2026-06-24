@@ -3,6 +3,9 @@
 The webhook tests exercise the real signature path (bad signature -> 400) and the
 event-handling logic (via a monkeypatched construct_event) without any live keys.
 """
+import pytest
+
+pytest.importorskip("stripe")
 
 import stripe
 from fastapi.testclient import TestClient
