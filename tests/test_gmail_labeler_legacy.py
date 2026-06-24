@@ -140,6 +140,11 @@ def test_categorize_email_falls_back_to_uncategorized(legacy_labeler):
     assert legacy_labeler.categorize_email(data) == "Uncategorized"
 
 
+def test_legacy_rules_keep_uncategorized_alias(legacy_labeler):
+    assert "Uncategorized" in legacy_labeler.LABEL_RULES
+    assert "Misc/Other" not in legacy_labeler.LABEL_RULES
+
+
 def test_execute_with_retry_backs_off_then_returns(monkeypatch, legacy_labeler):
     sleeps = []
     monkeypatch.setattr(legacy_labeler.time, "sleep", sleeps.append)

@@ -9,9 +9,9 @@ gmail_labeler.py. Do NOT extend it to archive or move out of inbox without
 adopting that gate first.
 """
 
-import re
 import time
 import socket
+from collections import OrderedDict
 from collections import defaultdict
 from datetime import datetime
 import importlib.metadata as importlib_metadata
@@ -28,259 +28,37 @@ if not hasattr(importlib_metadata, "packages_distributions"):
 from googleapiclient.errors import HttpError
 
 import gmail_auth
+from core.rules import LABEL_RULES as CORE_LABEL_RULES, categorize_from_strings
 
 # Gmail API scopes
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
-# ============================================================================
-# LABEL TAXONOMY - Comprehensive categorization rules
-# ============================================================================
+# LABEL TAXONOMY - Compatibility projection over core.rules
 
-LABEL_RULES = {
-    # Development & Code
-    "Dev/GitHub": {
-        "patterns": [
-            r"github\.com",
-            r"notifications@github",
-            r"@reply\.github\.com",
-            r"copilot",
-            r"ivi374forivi",
-        ],
-        "priority": 1,
-    },
-    "Dev/Code-Review": {
-        "patterns": [r"coderabb", r"sourcery", r"qodo", r"codacy", r"copilot", r"llamapre"],
-        "priority": 2,
-    },
-    "Dev/Infrastructure": {
-        "patterns": [
-            r"cloudflare",
-            r"vercel",
-            r"netlify",
-            r"digitalocean",
-            r"railway",
-            r"render\\.com",
-            r"newrelic",
-            r"pieces\\.app",
-        ],
-        "priority": 3,
-    },
-    # AI Services
-    "AI/Services": {
-        "patterns": [
-            r"openai",
-            r"anthropic",
-            r"claude",
-            r"x\.ai",
-            r"xai\.com",
-            r"xAI LLC",
-            r"perplexity",
-            r"meta\\.com",
-            r"ollama",
-        ],
-        "priority": 4,
-    },
-    "AI/Grok": {"patterns": [r"grok", r"x\.ai.*grok"], "priority": 5},
-    "AI/Data Exports": {"patterns": [r"data export", r"export is ready", r"download.*data"], "priority": 6},
-    # Finance & Payments
-    "Finance/Banking": {
-        "patterns": [
-            r"chase",
-            r"capital.?one",
-            r"verizon",
-            r"gemini",
-            r"experian",
-            r"chime",
-            r"kikoff",
-            r"self\\.inc",
-            r"nav\\.com",
-            r"bankofamerica",
-            r"wellsfargo",
-            r"citi",
-            r"usbank",
-            r"ally",
-            r"marcus",
-            r"regions",
-            r"pnc",
-        ],
-        "priority": 7,
-    },
-    "Finance/Payments": {
-        "patterns": [
-            r"paypal",
-            r"stripe",
-            r"kovo",
-            r"cash.?app",
-            r"true.?finance",
-            r"square",
-            r"braintree",
-            r"plaid",
-            r"capitalone",
-            r"joingerald",
-            r"vola",
-            r"venmo",
-            r"zelle",
-            r"att",
-            r"xfinity",
-            r"spectrum",
-            r"conedison",
-            r"discover",
-            r"american.?express",
-            r"barclaycard",
-            r"statement",
-            r"invoice",
-            r"payment.*due",
-        ],
-        "priority": 8,
-    },
-    # Subscriptions & Services
-    "Tech/Security": {
-        "patterns": [
-            r"1password",
-            r"security.*alert",
-            r"login.*detected",
-            r"new.*device",
-            r"password.*reset",
-            r"verification.*code",
-            r"dropbox",
-            r"todoist",
-        ],
-        "priority": 9,
-    },
-    # Commerce & Shopping
-    "Shopping": {
-        "patterns": [
-            r"uber",
-            r"amazon",
-            r"ebay",
-            r"etsy",
-            r"walmart",
-            r"target",
-            r"deepview",
-            r"squarespace",
-            r"lafitness",
-            r"bestbuy",
-            r"costco",
-            r"wayfair",
-            r"chewy",
-            r"zara",
-            r"hm\.com",
-            r"gap\.com",
-            r"oldnavy",
-            r"nike",
-            r"adidas",
-            r"nordstrom",
-            r"macys",
-            r"uniqlo",
-            r"lululemon",
-            r"order.*confirm",
-            r"shipped",
-            r"tracking",
-        ],
-        "priority": 10,
-    },
-    # Travel
-    "Travel": {
-        "patterns": [
-            r"united\.com",
-            r"aa\.com",
-            r"delta\.com",
-            r"southwest",
-            r"jetblue",
-            r"alaskaair",
-            r"spirit",
-            r"flyfrontier",
-            r"marriott",
-            r"hilton",
-            r"hyatt",
-            r"ihg",
-            r"airbnb",
-            r"vrbo",
-            r"booking\.com",
-            r"hotels\.com",
-            r"expedia",
-            r"kayak",
-            r"priceline",
-            r"orbitz",
-            r"hotwire",
-            r"itinerary",
-            r"boarding.*pass",
-            r"flight.*confirm",
-        ],
-        "priority": 11,
-    },
-    # Entertainment & Media
-    "Entertainment": {
-        "patterns": [r"fandango", r"audible", r"netflix", r"spotify", r"letterboxd", r"popcorn.?frights", r"warprecords"],
-        "priority": 12,
-    },
-    # Education
-    "Education/Research": {
-        "patterns": [
-            r"coursera",
-            r"udemy",
-            r"skillshare",
-            r"edx",
-            r"khanacademy",
-            r"scholar\.google",
-            r"researchgate",
-            r"arxiv",
-            r"academia\.edu",
-            r"learning",
-        ],
-        "priority": 13,
-    },
-    # Professional Services
-    "Professional/Jobs": {
-        "patterns": [r"higheredjobs", r"indeed", r"linkedin.*jobs", r"glassdoor", r"jobot", r"builtin\\.com", r"ziprecruiter", r"monster"],
-        "priority": 14,
-    },
-    # Domain Services
-    "Services/Domain": {"patterns": [r"namecheap", r"godaddy", r"domain.*renew", r"dns", r"e\\.godaddy\\.com"], "priority": 15},
-    # Notifications (catch-all for services)
-    "Notification": {
-        "patterns": [
-            r"notification",
-            r"alert",
-            r"reminder",
-            r"automatic.?appointment",
-            r"udemy.*instructor",
-            r"google.*workspace",
-            r"trinity-health",
-            r"deepview",
-            r"todoist",
-        ],
-        "priority": 16,
-    },
-    # Marketing
-    "Marketing": {
-        "patterns": [
-            r"unsubscribe",
-            r"newsletter",
-            r"promo",
-            r"special.*offer",
-            r"offer",
-            r"discount",
-            r"sale",
-            r"hims",
-            r"substack",
-            r"scaleclients",
-            r"collabwriting",
-            r"beehiiv",
-            r"coursera",
-            r"jupitrr",
-            r"myhumandesign",
-            r"ibo\\.org",
-        ],
-        "priority": 17,
-    },
-    # Personal (generic keywords only; no self address hardcoded — see core.rules)
-    "Personal": {"patterns": [r"family", r"mom", r"dad"], "priority": 18},
-    # Awaiting Action
-    "Awaiting Reply": {"patterns": [r"awaiting.*reply", r"pending.*response"], "priority": 19},
-    # Default catch-all
-    "Uncategorized": {"patterns": [r".*"], "priority": 999},
-}
+_LEGACY_CATCH_ALL = "Uncategorized"
+
+
+def _build_legacy_rules():
+    projected = OrderedDict()
+    for name, config in CORE_LABEL_RULES.items():
+        if name == "Misc/Other":
+            projected[_LEGACY_CATCH_ALL] = dict(config)
+        else:
+            projected[name] = dict(config)
+
+    if _LEGACY_CATCH_ALL not in projected:
+        projected[_LEGACY_CATCH_ALL] = {"patterns": [r".*"], "priority": 999}
+
+    return projected
+
+
+LABEL_RULES = _build_legacy_rules()
+
+
+def _normalize_legacy_label(label_name):
+    """Translate core taxonomy names back to legacy-compatible naming."""
+    return _LEGACY_CATCH_ALL if label_name == "Misc/Other" else label_name
+
 
 
 # ============================================================================
@@ -339,29 +117,17 @@ def get_or_create_label(service, label_name):
 
 def categorize_email(email_data):
     """Determine best label for an email based on sender/subject."""
-    headers = email_data["payload"]["headers"]
+    headers = email_data.get("payload", {}).get("headers", [])
     sender = ""
     subject = ""
     for header in headers:
-        name = header["name"].lower()
+        name = header.get("name", "").lower()
         if name == "from":
-            sender = header["value"]
+            sender = header.get("value", "")
         elif name == "subject":
-            subject = header["value"]
+            subject = header.get("value", "")
 
-    combined_text = f"{sender} {subject}".lower()
-
-    best_match = None
-    best_priority = 9999
-    for label_name, rule_config in LABEL_RULES.items():
-        for pattern in rule_config["patterns"]:
-            if re.search(pattern, combined_text, re.IGNORECASE):
-                if rule_config["priority"] < best_priority:
-                    best_match = label_name
-                    best_priority = rule_config["priority"]
-                    break
-
-    return best_match or "Uncategorized"
+    return _normalize_legacy_label(categorize_from_strings(sender, subject))
 
 
 # ============================================================================
