@@ -1307,6 +1307,9 @@ async function startCheckout(planId, btn) {
   btn.disabled = true;
   btn.textContent = "Redirecting...";
   const { ok, status, data } = await postJSON("/v1/billing/checkout", { plan: planId, email });
+  if (data && data.account_api_key) {
+    try { localStorage.setItem("uma-api-key", data.account_api_key); } catch (e) {}
+  }
   if (ok && data && data.url) { window.location.href = data.url; return; }
   btn.disabled = false;
   btn.textContent = prev;
@@ -1374,7 +1377,17 @@ function renderPlans(plans, staticCheckout) {
   const b = q.get("billing");
   if (!b) return;
   const msg = $("billingMsg");
-  if (msg && b === "success") msg.innerHTML = `<div class="notice ok">Subscription active. Receipt retention is enabled.</div>`;
+  if (msg && b === "success") {
+    let keyHtml = "";
+    try {
+      const k = localStorage.getItem("uma-api-key");
+      if (k) {
+        keyHtml = `<br><br><strong>Important:</strong> Save your API key now. It will not be shown again.<br><code style="user-select: all; display: inline-block; margin-top: 6px; padding: 6px 10px; background: #fff; border: 1px solid var(--line-strong); border-radius: var(--radius); font-size: 14px; color: var(--ink);">${escapeHtml(k)}</code>`;
+        localStorage.removeItem("uma-api-key");
+      }
+    } catch (e) {}
+    msg.innerHTML = `<div class="notice ok">Subscription active. Receipt retention is enabled.${keyHtml}</div>`;
+  }
   if (msg && b === "cancel") msg.innerHTML = `<div class="notice warn">Checkout canceled. No charge made.</div>`;
   document.getElementById("plans-title").scrollIntoView();
 })();
