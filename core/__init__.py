@@ -5,6 +5,14 @@ Provides shared categorization rules, state management, and data models
 used across all email providers (Gmail, IMAP, Mail.app, Outlook).
 """
 
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+__version__ = "0.2.0"
+try:
+    __version__ = _pkg_version("universal-mail-automation")
+except PackageNotFoundError:
+    pass
+
 from core.models import EmailMessage, LabelAction, ProcessingResult
 from core.rules import (
     LABEL_RULES,
@@ -100,4 +108,5 @@ __all__ = [
     "Config",
     "load_config",
     "create_sample_config",
+    "__version__",
 ]
