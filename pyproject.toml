@@ -1,3 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "universal-mail-automation"
+version = "0.1.0"
+description = "Automated inbox triage with a fail-closed safety gate and independent audit receipts."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Anthony", email = "anthony@organvm.org" }]
+dependencies = [
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.22.0",
+    "stripe>=10.0.0",
+]
+outlook = [
+    "msal>=1.20.0",
+    "requests>=2.30.0",
+]
+mcp = [
+    "mcp>=1.1.2",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.scripts]
+umail = "cli:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["api*", "acp*", "audit*", "auth*", "config*", "core*", "mcp_server*", "platform*", "providers*"]
+
+[tool.setuptools]
+py-modules = ["analyze_strategic_value", "archive_sorted", "auto_drain", "bulk_sweeper", "check_health", "cli", "configure_smart_mailboxes", "draft_writer", "final_sweep", "gmail_auth", "gmail_imap_sweep", "gmail_labeler", "gmail_labeler_legacy", "icloud_triage", "imap_rules", "inbox_sweep", "inspect_remaining", "mark_rot_read", "obligations_build", "organize_labels", "recount"]

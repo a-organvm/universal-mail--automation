@@ -272,6 +272,7 @@ def _render_markdown(items: List[TriageItem]) -> str:
     if drafts:
         out += ["", "## Suggested replies (in your voice)", ""]
         for it in drafts:
+            draft_str = it.suggested_draft or ""
             out += [f"### #{it.rank} — {it.message.subject[:60]}", "",
-                    "```", it.suggested_draft.strip(), "```", ""]
+                    "```", draft_str.strip(), "```", ""]
     return "\n".join(out)

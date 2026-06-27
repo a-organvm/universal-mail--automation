@@ -26,7 +26,10 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Set, Optional, Tuple, Iterable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.research import ResearchDossier
 
 # Default location for a persisted profile / learned-from corpus.
 DEFAULT_VOICE_PATH = Path("~/.config/mail_automation/voice.json").expanduser()
@@ -152,7 +155,7 @@ class VoiceProfile:
 
     def draft_reply(
         self,
-        dossier,
+        dossier: "ResearchDossier",
         recipient_first: str = "",
         max_points: int = 4,
     ) -> str:

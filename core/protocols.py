@@ -27,7 +27,17 @@ Design notes:
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, TypedDict
+
+class ProtocolDef(TypedDict):
+    cls: str
+    match: re.Pattern[str]
+    priority: int
+    verify_first: bool
+    requires_reply: bool
+    next_step: str
+    draft_hint: Optional[str]
+    tags: List[str]
 
 
 @dataclass
@@ -74,7 +84,7 @@ def _looks_human(sender: str) -> bool:
 # priority, the codified next step, whether it needs sender-verification first, whether
 # a reply is owed, and a draft intent (None = no outbound reply, just an action).
 # Order matters: most-consequential / most-specific first (first match wins).
-_PROTOCOLS = [
+_PROTOCOLS: List[ProtocolDef] = [
     {
         "cls": "security-credential-change",
         "match": re.compile(r"(?ix) (fsa\s*id|password|sign[-\s]*in|login\s*code|"

@@ -263,28 +263,28 @@ def _apply_yaml_config(config: Config, data: Dict[str, Any]) -> None:
 def _apply_env_config(config: Config, prefix: str) -> None:
     """Apply environment variable overrides to config object."""
     # General settings
-    if os.getenv(f"{prefix}DEFAULT_PROVIDER"):
-        config.default_provider = os.getenv(f"{prefix}DEFAULT_PROVIDER")
-    if os.getenv(f"{prefix}LOG_LEVEL"):
-        config.log_level = os.getenv(f"{prefix}LOG_LEVEL")
-    if os.getenv(f"{prefix}DRY_RUN"):
-        config.dry_run = os.getenv(f"{prefix}DRY_RUN", "").lower() in ("1", "true", "yes")
-    if os.getenv(f"{prefix}BATCH_SIZE"):
-        config.batch_size = int(os.getenv(f"{prefix}BATCH_SIZE"))
+    if def_prov := os.getenv(f"{prefix}DEFAULT_PROVIDER"):
+        config.default_provider = def_prov
+    if log_lvl := os.getenv(f"{prefix}LOG_LEVEL"):
+        config.log_level = log_lvl
+    if dry_r := os.getenv(f"{prefix}DRY_RUN"):
+        config.dry_run = dry_r.lower() in ("1", "true", "yes")
+    if b_size := os.getenv(f"{prefix}BATCH_SIZE"):
+        config.batch_size = int(b_size)
 
     # Gmail
-    if os.getenv(f"{prefix}GMAIL_QUERY"):
-        config.gmail.default_query = os.getenv(f"{prefix}GMAIL_QUERY")
-    if os.getenv(f"{prefix}GMAIL_STATE_FILE"):
-        config.gmail.state_file = os.getenv(f"{prefix}GMAIL_STATE_FILE")
+    if g_q := os.getenv(f"{prefix}GMAIL_QUERY"):
+        config.gmail.default_query = g_q
+    if g_s := os.getenv(f"{prefix}GMAIL_STATE_FILE"):
+        config.gmail.state_file = g_s
 
     # IMAP
-    if os.getenv("IMAP_HOST"):
-        config.imap.host = os.getenv("IMAP_HOST")
-    if os.getenv("IMAP_USER"):
-        config.imap.user = os.getenv("IMAP_USER")
-    if os.getenv(f"{prefix}IMAP_GMAIL_EXTENSIONS"):
-        config.imap.use_gmail_extensions = os.getenv(f"{prefix}IMAP_GMAIL_EXTENSIONS", "").lower() in ("1", "true", "yes")
+    if i_h := os.getenv("IMAP_HOST"):
+        config.imap.host = i_h
+    if i_u := os.getenv("IMAP_USER"):
+        config.imap.user = i_u
+    if i_g := os.getenv(f"{prefix}IMAP_GMAIL_EXTENSIONS"):
+        config.imap.use_gmail_extensions = i_g.lower() in ("1", "true", "yes")
 
     # Mail.app
     if os.getenv(f"{prefix}MAILAPP_ACCOUNT"):

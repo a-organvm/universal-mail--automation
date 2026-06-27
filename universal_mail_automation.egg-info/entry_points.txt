@@ -1,3 +1,2 @@
 [console_scripts]
 umail = cli:main
-umail-mcp = mcp_server.server:main

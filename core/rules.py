@@ -10,7 +10,20 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parseaddr
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Iterator, TypedDict
+
+class LabelRuleDef(TypedDict, total=False):
+    patterns: List[str]
+    domains: List[str]
+    priority: int
+    tier: int
+    time_sensitive: bool
+    requires_reply: bool
+    not_if_seen: List[str]
+    not_if_sender: List[str]
+    time_limit_days: int
+    match: Optional[re.Pattern[str]]
+    neg_match: Optional[re.Pattern[str]]
 
 
 # ============================================================================
@@ -67,7 +80,7 @@ PRIORITY_TIERS: Dict[int, PriorityTier] = {
 # LABEL TAXONOMY - Comprehensive categorization rules
 # ============================================================================
 
-LABEL_RULES: Dict[str, Dict[str, Any]] = {
+LABEL_RULES: Dict[str, LabelRuleDef] = {
     # Development & Code
     "Dev/GitHub": {
         "patterns": [
@@ -779,7 +792,7 @@ def normalize_sender(raw_from: Optional[str]) -> Tuple[str, str, str]:
     return (display, email_, domain)
 
 
-def _iter_sender_domains(raw_from: str):
+def _iter_sender_domains(raw_from: str) -> Iterator[Tuple[str, str]]:
     """Yield (email, domain) for EVERY address in a (possibly multi-address) From,
     each relay/MIME/IDNA-decoded. The gate matches the UNION so a protected sender
     listed alongside others (e.g. 'Lawyer <a@firm>, Assistant <b@bulk>') can't
@@ -1051,9 +1064,9 @@ def _find_best_label(combined_text: str) -> str:
     best_key = (9999, 9)  # (priority, tier): lower wins on both axes
 
     for label_name, rule_config in LABEL_RULES.items():
-        for pattern in rule_config["patterns"]:
+        for pattern in rule_config.get("patterns", []):
             if re.search(pattern, combined_text, re.IGNORECASE):
-                key = (rule_config["priority"], rule_config.get("tier", 4))
+                key = (rule_config.get("priority", 999), rule_config.get("tier", 4))
                 if key < best_key:
                     best_match = label_name
                     best_key = key

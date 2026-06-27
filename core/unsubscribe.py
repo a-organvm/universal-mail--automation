@@ -16,6 +16,15 @@ available), extracting the mailto: and HTTPS one-click variants per RFC 2369 / R
 
 import re
 from collections import defaultdict
+from typing import Dict, List, Any, Set, TypedDict
+
+class GroupDef(TypedDict):
+    count: int
+    name: str
+    sender: str
+    subjects: List[str]
+    labels: Set[str]
+    accounts: Set[str]
 
 _GATED_ON = "L-MCP / L-OAUTH / L-IMAP-APP-PW"
 
@@ -34,13 +43,13 @@ def _name(sender: str) -> str:
     return name if name and "@" not in name else _domain(sender)
 
 
-def parse_list_unsubscribe(header: str):
+def parse_list_unsubscribe(header: str) -> Dict[str, List[str]]:
     """Parse a List-Unsubscribe header into its actionable targets.
 
     Returns {"mailto": [...], "https": [...]}. Prefer the HTTPS one-click target (RFC
     8058) when a ``List-Unsubscribe-Post: List-Unsubscribe=One-Click`` companion is
     present; the mailto: target is the keyless fallback (send an unsubscribe email)."""
-    out = {"mailto": [], "https": []}
+    out: Dict[str, List[str]] = {"mailto": [], "https": []}
     for m in re.findall(r"<([^>]+)>", header or ""):
         t = m.strip()
         if t.lower().startswith("mailto:"):
@@ -50,7 +59,7 @@ def parse_list_unsubscribe(header: str):
     return out
 
 
-def propose(rows, min_count=2):
+def propose(rows: List[Dict[str, Any]], min_count: int = 2) -> List[Dict[str, Any]]:
     """From classified sweep rows, propose noise-killers for recurring archive senders.
 
     A sender that lands in the archive bucket repeatedly is refilling the inbox — the cure
@@ -58,7 +67,7 @@ def propose(rows, min_count=2):
     real sending domain, keeps those seen >= min_count, and returns the owned proposals
     sorted by frequency. Marketing-labelled single hits are included too (one is enough to
     justify the unsubscribe)."""
-    groups = defaultdict(lambda: {"count": 0, "name": "", "sender": "", "subjects": [],
+    groups: Dict[str, GroupDef] = defaultdict(lambda: {"count": 0, "name": "", "sender": "", "subjects": [],
                                   "labels": set(), "accounts": set()})
     for r in rows:
         if r.get("action") != "archive":
@@ -77,7 +86,7 @@ def propose(rows, min_count=2):
         if r.get("_account"):
             g["accounts"].add(r["_account"])
 
-    proposals = []
+    proposals: List[Dict[str, Any]] = []
     for dom, g in groups.items():
         marketing = any("market" in l.lower() or "newsletter" in l.lower()
                         for l in g["labels"])
@@ -95,5 +104,5 @@ def propose(rows, min_count=2):
             "status": "proposed",
             "gated_on": _GATED_ON,
         })
-    proposals.sort(key=lambda p: p["count"], reverse=True)
+    proposals.sort(key=lambda p: int(str(p["count"])), reverse=True)
     return proposals
