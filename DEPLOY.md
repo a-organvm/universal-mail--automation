@@ -1,86 +1,78 @@
 # Deploy
 
-The service is a single FastAPI app (API at `/v1/*`, dashboard at `/app`, health at
-`/health`). It ships as a `Dockerfile` that honors a platform-provided `$PORT`, so it
-runs unchanged on any container host.
+Universal Mail Automation is deploy-ready as a single FastAPI service:
 
-## Local
+- API: `/v1/*`
+- Dashboard: `/app/`
+- Health: `/health`
+- Agent surfaces: `/mcp`, `/acp/*`, `/.well-known/agent.json`, `/llms.txt`
+
+The committed `Dockerfile` honors a platform-provided `PORT`. `render.yaml`
+provides the Render blueprint. The Cloudflare Worker remains a public share/demo
+surface, not the canonical product backend.
+
+## Verified locally
+
+These checks passed on 2026-06-27:
 
 ```bash
-pip install -r requirements.txt -r requirements-api.txt
-uvicorn api.app:app --reload        # http://127.0.0.1:8000/app
+python3 -m pytest -q
+python3 -m ruff check --select E9,F63,F7,F82 .
+python3 -m build --no-isolation --skip-dependency-check
+python3 -m twine check dist/*
+npm run lint --prefix web -- --max-warnings=0
+npm run build --prefix web
+node --test cloudflare/worker.test.mjs
 ```
 
-## Docker (anywhere)
+FastAPI was also smoke-tested in process with `TestClient` for `/health`,
+`/v1/billing/plans`, `/v1/senders/check`, `/app/`, and
+`/.well-known/agent.json`.
+
+Socket binding and Docker smoke tests were not runnable in this sandbox:
+`uvicorn` startup reached application startup, then local port binding returned
+`operation not permitted`; `docker` is not installed here. The CI deploy workflow
+builds and smoke-tests the same Dockerfile.
+
+## Deploy commands
+
+Container host:
 
 ```bash
 docker build -t mail-api .
 docker run -p 8000:8000 --env-file prod.env mail-api
 ```
 
-## Render (blueprint included)
+Render:
 
-Push the repo, then in Render: **New + → Blueprint** and pick this repo. `render.yaml`
-provisions a Docker web service with a `/health` check. Set provider credentials as
-environment variables in the dashboard (below).
-
-## Fly.io
-
-```bash
-fly launch --dockerfile Dockerfile --internal-port 8000   # generates fly.toml
-fly secrets set GMAIL_OAUTH_OP_REF=... GMAIL_TOKEN_OP_REF=...
-fly deploy
+```text
+Render -> New + -> Blueprint -> select this repo -> set env vars below
 ```
 
-## Credentials (set as host env vars — never commit)
+Cloudflare share demo:
 
-Single-tenant for now: the server holds the mailbox credentials. Per provider:
+```bash
+npm ci --prefix web
+npm run build --prefix web
+CLOUDFLARE_API_TOKEN=... npx wrangler@4 deploy
+```
 
-| Provider | Env vars |
-|---|---|
-| Gmail | `GMAIL_OAUTH_OP_REF`, `GMAIL_TOKEN_OP_REF` (or the `OP_GMAIL_TOKEN_*` triplet) |
-| IMAP | `IMAP_HOST`, `IMAP_USER`, `IMAP_PASS` (or 1Password refs) |
-| Outlook | `OUTLOOK_CLIENT_ID`, `OUTLOOK_TOKEN_CACHE` |
-| Mail.app | local macOS only (not container-deployable) |
+## What remains
 
-The pure endpoints (`/health`, `/v1/senders/check`) and the dashboard's live
-protected-sender check need **no** credentials — so a deployed instance is demoable
-immediately, before any mailbox is connected.
+1. Remote PR/CI gate: from a networked shell, run `gh pr list`, make open PRs
+   green, merge the ready ones, and confirm GitHub Actions are green on `main`.
+   This sandbox cannot reach `api.github.com`.
+2. Production host gate: choose the live host and set its base env. A
+   no-credential demo only needs the app deployed; set `MCP_ALLOWED_HOSTS` to
+   the public hostname if `/mcp` is exposed.
+3. Live mailbox gate: set provider credentials for the mailbox providers to use:
+   `GMAIL_OAUTH_OP_REF`/`GMAIL_TOKEN_OP_REF`, or `IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`,
+   or `OUTLOOK_CLIENT_ID`/`OUTLOOK_TOKEN_CACHE`.
+4. Money gate: set `STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`,
+   `STRIPE_PRICE_BUSINESS`, and `STRIPE_WEBHOOK_SECRET`; configure Stripe to send
+   `checkout.session.completed`, `customer.subscription.*`, `invoice.paid`, and
+   `invoice.payment_failed` to `https://<host>/v1/billing/webhook`.
+5. Cloudflare demo gate: set `CLOUDFLARE_API_TOKEN` in CI or the local deploy
+   environment before claiming `https://uma.4444j99.dev` is current.
 
-## Commerce & agent surfaces
-
-The same app serves the money + agent surfaces. All of these are **fail-soft**:
-absent the relevant secret, the catalog/pure endpoints still work and the
-money/charge endpoints return a clean `503 billing is not configured`.
-
-| Surface | Endpoint(s) | Secret(s) needed |
-|---|---|---|
-| Pricing catalog | `GET /v1/billing/plans` | none |
-| Subscription checkout | `POST /v1/billing/checkout` | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_BUSINESS` |
-| Customer portal | `POST /v1/billing/portal` | `STRIPE_SECRET_KEY` |
-| Stripe webhook | `POST /v1/billing/webhook` | `STRIPE_WEBHOOK_SECRET` |
-| Signed receipt | `GET /v1/audit/{run_id}` | `RECEIPT_SIGNING_KEY` (else ephemeral) |
-| Agentic Commerce (ACP) | `/acp/checkout_sessions*`, `GET /acp/feed.json` | `STRIPE_SECRET_KEY` (for the charge) |
-| MCP tools (Streamable HTTP) | `/mcp` | `MCP_ALLOWED_HOSTS` = your host(s) |
-| Agent discovery | `GET /.well-known/agent.json`, `GET /llms.txt` | none |
-
-Webhook setup: in the Stripe dashboard, point a webhook at
-`https://<host>/v1/billing/webhook` and subscribe to `checkout.session.completed`,
-`customer.subscription.*`, `invoice.paid`, `invoice.payment_failed`. Locally:
-`stripe listen --forward-to localhost:8000/v1/billing/webhook`.
-
-MCP: the deploy image (Python 3.11) installs `requirements-mcp.txt`, so `/mcp` is
-live. Set `MCP_ALLOWED_HOSTS=<your-domain>` (DNS-rebinding protection is on by
-default; use `*` only if a proxy already validates Host). Local stdio for Claude
-Desktop etc.: `python -m mcp_server`. See `docs/agent-commerce.md`.
-
-Regenerate the static GTM artifacts (`pricing.md`, `llms.txt`,
-`.well-known/agent.json`, `server.json`) after any pricing change:
-`PUBLIC_BASE_URL=https://<host> python scripts/gen_commerce_artifacts.py`.
-
-## Next milestone
-
-Multi-tenant auth (customers connect their **own** mailbox via OAuth) and the MCP
-OAuth 2.1 Resource Server (`/.well-known/oauth-protected-resource`) are the next
-bricks — both are credential-gated on registering OAuth apps. See the product
-roadmap in `docs/plans/`.
+No local code blockers remain.

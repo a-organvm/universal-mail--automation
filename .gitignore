@@ -24,6 +24,8 @@ data/
 # Python
 __pycache__/
 *.py[cod]
+build/
+dist/
 .venv/
 env/
 venv/

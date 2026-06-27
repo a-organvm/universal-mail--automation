@@ -14,6 +14,12 @@ requirements-api.txt
 requirements-mcp.txt
 requirements.txt
 setup.py
+acp/__init__.py
+acp/feed.py
+acp/models.py
+acp/payment.py
+acp/product_feed.json
+acp/router.py
 api/__init__.py
 api/app.py
 api/auth.py
@@ -34,11 +40,13 @@ core/audit.py
 core/config.py
 core/license.py
 core/models.py
+core/protocols.py
 core/py.typed
 core/research.py
 core/rules.py
 core/state.py
 core/triage.py
+core/unsubscribe.py
 core/voice.py
 mcp_server/__init__.py
 mcp_server/__main__.py

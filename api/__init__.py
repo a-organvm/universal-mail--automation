@@ -5,4 +5,4 @@ protected-sender gate: triage runs through the engine's gate AND an independent
 audit observer, and the API asserts no-violations at the boundary (fail-closed).
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
