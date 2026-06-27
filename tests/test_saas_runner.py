@@ -158,6 +158,13 @@ def test_token_required():
         saas.run_saas_triage(token="   ", provider="fake")
 
 
+def test_invalid_saas_inputs_rejected_before_rate_limit():
+    limiter = saas.TierRateLimiter(clock=_FakeClock())
+    with pytest.raises(saas.InvalidInput):
+        saas.run_saas_triage(token="tok", provider="../gmail", limiter=limiter)
+    assert limiter.peek("tok", "free").remaining == saas.rate_limit_for("free")
+
+
 def test_happy_path_returns_report(monkeypatch):
     limiter = saas.TierRateLimiter(clock=_FakeClock())
     result = saas.run_saas_triage(
@@ -281,6 +288,19 @@ def test_http_limits_catalog(client):
 def test_http_missing_token_is_401(client):
     r = client.post("/v1/saas/triage", json={"provider": "fake"})
     assert r.status_code == 401
+
+
+def test_http_malformed_provider_is_400_before_service(client, monkeypatch):
+    called = {"run": False}
+
+    def _run(**_kwargs):
+        called["run"] = True
+        return {"dry_run": True}
+
+    monkeypatch.setattr(service, "run_triage", _run)
+    r = client.post("/v1/saas/triage", json={"token": "tok", "provider": "../gmail"})
+    assert r.status_code == 400
+    assert called["run"] is False
 
 
 def test_http_triage_happy_path(client, monkeypatch):

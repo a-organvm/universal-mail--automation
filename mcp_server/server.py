@@ -34,6 +34,15 @@ from mcp.server.streamable_http import TransportSecuritySettings
 from api import metering, service, triage_runtime
 from api.schemas import MAX_TRIAGE_LIMIT, SenderCheckResponse, TriageResponse
 from api.store import get_store
+from core.input_validation import (
+    InputValidationError,
+    validate_api_token,
+    validate_header_value,
+    validate_mail_label,
+    validate_provider_name,
+    validate_search_query,
+    validate_triage_limit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +91,7 @@ mcp = FastMCP(
 
 
 def _clamp_limit(limit: int) -> int:
-    return max(1, min(int(limit), MAX_TRIAGE_LIMIT))
+    return validate_triage_limit(limit, max_limit=MAX_TRIAGE_LIMIT)
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -92,7 +101,12 @@ def check_protected_sender(sender: str, subject: str = "") -> SenderCheckRespons
     Pure — needs no mailbox credentials. Protected classes: government (.gov),
     financial, legal, and platform-security senders.
     """
-    return SenderCheckResponse(**service.check_sender(sender[:4096], subject[:4096]))
+    try:
+        sender = validate_header_value(sender, field="sender", allow_empty=False)
+        subject = validate_header_value(subject or "", field="subject")
+    except InputValidationError as e:
+        raise RuntimeError(f"invalid input: {e}") from e
+    return SenderCheckResponse(**service.check_sender(sender, subject))
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -131,6 +145,18 @@ def triage(
 
 def _triage(provider, query, limit, *, dry_run, remove_label, tier_routing,
             vip_only, account_api_key=None) -> TriageResponse:
+    try:
+        provider = validate_provider_name(provider)
+        query = validate_search_query(query)
+        limit = _clamp_limit(limit)
+        remove_label = validate_mail_label(remove_label)
+        if account_api_key is not None:
+            account_api_key = validate_api_token(
+                account_api_key, field="account_api_key"
+            )
+    except InputValidationError as e:
+        raise RuntimeError(f"invalid input: {e}") from e
+
     account = None
     if not dry_run:
         if not account_api_key:
@@ -141,7 +167,7 @@ def _triage(provider, query, limit, *, dry_run, remove_label, tier_routing,
 
     try:
         result = triage_runtime.run_triage_with_receipt(
-            provider=provider, query=query, limit=_clamp_limit(limit),
+            provider=provider, query=query, limit=limit,
             dry_run=dry_run, remove_label=remove_label,
             tier_routing=tier_routing, vip_only=vip_only, account=account,
         )

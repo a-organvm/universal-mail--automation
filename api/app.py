@@ -36,6 +36,7 @@ from api import (
     well_known,
 )
 from api.auth import require_authorized_account
+from core.input_validation import InputValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,8 @@ def _run(
         )
     except triage_runtime.AccountRequired:
         raise HTTPException(status_code=401, detail="missing bearer credentials")
+    except InputValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except metering.ProviderNotAllowed as e:
         raise HTTPException(status_code=403, detail=str(e))
     except metering.EntitlementExhausted as e:
