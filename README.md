@@ -299,8 +299,9 @@ INSTALL_LAUNCH_AGENT=1 ./deploy.sh
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-pip install msal requests   # For Outlook support
+pip install -r requirements.txt          # core + Gmail + Outlook + YAML config
+pip install -r requirements-api.txt      # FastAPI server (optional)
+pip install -r requirements-mcp.txt      # MCP server (optional, Python 3.10+)
 ```
 
 ### First Run
@@ -358,7 +359,7 @@ python3 cli.py label --provider outlook --dry-run
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--query`, `-q` | `has:nouserlabels` | Provider query selecting messages to process |
-| `--limit`, `-l` | `1000` | Max messages per run (reduced to the free cap when unlicensed) |
+| `--limit`, `-l` | `1000` | Max messages per run |
 | `--dry-run`, `-n` | off | Preview decisions; apply nothing and write no receipt |
 | `--remove-label` | none | Remove this label when a new category is assigned |
 | `--state-file` | none | JSON state file for crash-recovery / resumption |
