@@ -55,3 +55,28 @@ def test_dashboard_interactive_controls_use_real_api_states():
 def test_dashboard_defines_status_color_tokens():
     for token in ("--green:", "--green-2:", "--green-soft:"):
         assert token in WEB_HTML
+
+
+def test_checkout_persists_api_key_before_stripe_redirect():
+    # startCheckout must save the generated API key to sessionStorage before
+    # navigating away — once the JS context is discarded on redirect the checkout
+    # response is gone and the key is unrecoverable without a support request.
+    assert "uma_pending_key" in WEB_HTML
+    assert "sessionStorage.setItem" in WEB_HTML
+    assert "account_api_key" in WEB_HTML
+
+
+def test_billing_success_reads_and_displays_api_key():
+    # The ?billing=success handler must read the persisted key from sessionStorage
+    # and render it so a new subscriber can immediately copy it for use.
+    assert "sessionStorage.getItem" in WEB_HTML
+    assert "uma-api-key" in WEB_HTML
+    # Key is removed from storage after display so it isn't leaked on refresh.
+    assert "sessionStorage.removeItem" in WEB_HTML
+
+
+def test_plan_cards_render_api_feature_list():
+    # The plan card template must use p.features from the API response rather than
+    # hardcoded strings — a stranger needs to see the full value proposition.
+    assert "p.features" in WEB_HTML
+    assert "Gate and receipts</li>" not in WEB_HTML

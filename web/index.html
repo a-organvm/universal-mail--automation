@@ -1307,7 +1307,14 @@ async function startCheckout(planId, btn) {
   btn.disabled = true;
   btn.textContent = "Redirecting...";
   const { ok, status, data } = await postJSON("/v1/billing/checkout", { plan: planId, email });
-  if (ok && data && data.url) { window.location.href = data.url; return; }
+  if (ok && data && data.url) {
+    // The checkout endpoint returns the API key exactly once — before the Stripe
+    // redirect the JS context is discarded and the key is unrecoverable without
+    // a support request. Persist it so the success-return handler can show it.
+    try { sessionStorage.setItem("uma_pending_key", data.account_api_key || ""); } catch (e) {}
+    window.location.href = data.url;
+    return;
+  }
   btn.disabled = false;
   btn.textContent = prev;
   if (status === 503) {
@@ -1333,9 +1340,7 @@ function renderPlans(plans, staticCheckout) {
         <div class="plan-reveal-body">
           <div class="blurb">${escapeHtml(p.blurb || "")}</div>
           <ul>
-            <li>${escapeHtml(cap)}</li>
-            <li>Providers: ${escapeHtml(p.providers || "-")}</li>
-            <li>Gate and receipts</li>
+            ${(p.features && p.features.length ? p.features : [cap, `Providers: ${p.providers || "-"}`, "Fail-closed gate + audit receipt"]).map(f => `<li>${escapeHtml(f)}</li>`).join("")}
           </ul>
         </div>
       </details>`;
@@ -1374,7 +1379,25 @@ function renderPlans(plans, staticCheckout) {
   const b = q.get("billing");
   if (!b) return;
   const msg = $("billingMsg");
-  if (msg && b === "success") msg.innerHTML = `<div class="notice ok">Subscription active. Receipt retention is enabled.</div>`;
+  if (msg && b === "success") {
+    let key = "";
+    try {
+      key = sessionStorage.getItem("uma_pending_key") || "";
+      sessionStorage.removeItem("uma_pending_key");
+    } catch (e) {}
+    const keySection = key
+      ? `<p style="margin-top:10px;font-size:13px">
+           Your API key — copy it now, it will not be shown again:<br>
+           <code id="uma-api-key" style="display:block;margin:6px 0;word-break:break-all;user-select:all;padding:6px 8px;background:var(--paper-2);border:1px solid var(--line);border-radius:var(--radius)">${escapeHtml(key)}</code>
+           <button class="btn btn-secondary" style="font-size:12px;padding:4px 10px"
+             onclick="navigator.clipboard.writeText(document.getElementById('uma-api-key').textContent).then(()=>this.textContent='Copied ✓').catch(()=>{})">Copy key</button>
+           <span style="color:var(--muted);font-size:12px;margin-left:8px">Use as: Authorization: Bearer &lt;key&gt;</span>
+         </p>`
+      : `<p style="margin-top:10px;font-size:13px;color:var(--muted)">
+           API key not found in this session. Contact support with your purchase email to retrieve it.
+         </p>`;
+    msg.innerHTML = `<div class="notice ok">Subscription active. Receipt retention is enabled.</div>${keySection}`;
+  }
   if (msg && b === "cancel") msg.innerHTML = `<div class="notice warn">Checkout canceled. No charge made.</div>`;
   document.getElementById("plans-title").scrollIntoView();
 })();
