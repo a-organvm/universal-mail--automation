@@ -529,18 +529,23 @@ LABEL_RULES: Dict[str, LabelRuleDef] = {
 }
 
 # Labels that should trigger starring (high priority)
-PRIORITY_LABELS = {
+PRIORITY_LABELS: Set[str] = {
     "Finance/Banking",
     "Tech/Security",
 }
 
 # Labels that should remain in inbox (not archived)
-KEEP_IN_INBOX = {
+KEEP_IN_INBOX: Set[str] = {
     "Finance/Banking",
     "Tech/Security",
     "Personal",
     "Awaiting Reply",
 }
+
+
+def _get_rule(label: str, fallback: LabelRuleDef) -> LabelRuleDef:
+    """Return a typed rule for label with explicit fallback contract."""
+    return LABEL_RULES.get(label, fallback)
 
 
 # ============================================================================
@@ -595,11 +600,11 @@ EXAMPLE_PROTECTED_SENDERS: List[str] = [
 ]
 
 # iCloud relay carriers whose local-part encodes the real sender's address.
-RELAY_DOMAINS = {"icloud.com", "privaterelay.appleid.com"}
+RELAY_DOMAINS: Set[str] = {"icloud.com", "privaterelay.appleid.com"}
 # Gmail mailboxes that canonicalize away dots and +tags in the local part.
-GMAIL_DOMAINS = {"gmail.com", "googlemail.com"}
+GMAIL_DOMAINS: Set[str] = {"gmail.com", "googlemail.com"}
 # Synthetic self placeholder; the real self mailbox(es) load from the local config.
-EXAMPLE_SELF_LOCALPARTS = {"youremail"}
+EXAMPLE_SELF_LOCALPARTS: Set[str] = {"youremail"}
 
 
 def _load_local_protected() -> Tuple[List[str], Set[str]]:
@@ -1015,13 +1020,13 @@ def categorize_with_tier(sender: str, subject: str) -> CategorizationResult:
         # Use label override if specified, otherwise do normal categorization
         if vip.label_override:
             label = vip.label_override
-            rule = LABEL_RULES.get(label, {"time_sensitive": True})
+            rule = _get_rule(label=label, fallback={"time_sensitive": True})
             time_sensitive = rule.get("time_sensitive", True)
         else:
             # Still categorize normally but use VIP tier
             combined_text = f"{sender} {subject}".lower()
             label = _find_best_label(combined_text)
-            rule = LABEL_RULES.get(label, {})
+            rule = _get_rule(label=label, fallback=LABEL_RULES["Misc/Other"])
             time_sensitive = rule.get("time_sensitive", True)  # VIP is time-sensitive
 
         return CategorizationResult(
@@ -1037,7 +1042,7 @@ def categorize_with_tier(sender: str, subject: str) -> CategorizationResult:
     combined_text = f"{sender} {subject}".lower()
     label = _find_best_label(combined_text)
 
-    rule = LABEL_RULES[label]
+    rule = _get_rule(label=label, fallback=LABEL_RULES["Misc/Other"])
     tier = rule.get("tier", 4)
     time_sensitive = rule.get("time_sensitive", False)
     tier_config = PRIORITY_TIERS.get(tier, PRIORITY_TIERS[4])
@@ -1077,7 +1082,7 @@ def _find_best_label(combined_text: str) -> str:
 
 def get_tier_for_label(label: str) -> int:
     """Get the priority tier for a label."""
-    rule = LABEL_RULES.get(label, {})
+    rule = _get_rule(label=label, fallback=LABEL_RULES["Misc/Other"])
     return rule.get("tier", 4)
 
 
@@ -1108,7 +1113,7 @@ def should_keep_in_inbox(label: str) -> bool:
 
 def is_time_sensitive(label: str) -> bool:
     """Check if a label is time-sensitive (should escalate with age)."""
-    rule = LABEL_RULES.get(label, {})
+    rule = _get_rule(label=label, fallback=LABEL_RULES["Misc/Other"])
     return rule.get("time_sensitive", False)
 
 
