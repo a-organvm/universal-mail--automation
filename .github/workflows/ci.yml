@@ -45,6 +45,9 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-api.txt -r requirements-mcp.txt
           python -m pip install pytest pytest-cov ruff
 
+      - name: Verify Python dependencies are consistent
+        run: python -m pip check
+
       - name: Lint Python
         run: python -m ruff check --select E9,F63,F7,F82 .
 
