@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import HTTPException, Request
 
+from core.input_validation import InputValidationError, validate_api_token
 from api.store import get_store
 
 
@@ -15,7 +16,12 @@ def bearer_api_key(request: Request) -> Optional[str]:  # allow-secret: function
         return None
     if not auth.startswith("Bearer ") or not auth[len("Bearer "):].strip():
         raise HTTPException(status_code=401, detail="invalid bearer credentials")
-    return auth[len("Bearer "):].strip()  # allow-secret: parsed header, not literal
+    try:
+        return validate_api_token(
+            auth[len("Bearer "):], field="bearer token"
+        )  # allow-secret: parsed header, not literal
+    except InputValidationError:
+        raise HTTPException(status_code=401, detail="invalid bearer credentials")
 
 
 def authorized_account(request: Request) -> Optional[dict]:

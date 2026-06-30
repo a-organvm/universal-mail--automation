@@ -19,6 +19,12 @@ from enum import Enum
 from typing import Any, Callable, Optional
 
 from core.audit import AuditInvariantError, AuditLog
+from core.input_validation import (
+    validate_mail_label,
+    validate_provider_name,
+    validate_search_query,
+    validate_triage_limit,
+)
 from core.rules import categorize_with_tier, is_protected_sender
 
 logger = logging.getLogger(__name__)
@@ -85,6 +91,11 @@ def run_triage(
     the inbox, :meth:`AuditLog.assert_no_violations` raises
     :class:`AuditInvariantError` and this function never returns a success body.
     """
+    provider = validate_provider_name(provider)
+    query = validate_search_query(query)
+    limit = validate_triage_limit(limit)
+    remove_label = validate_mail_label(remove_label)
+
     factory = provider_factory or get_provider
     # Build + connect are wrapped together: an unknown provider raises ValueError
     # from the factory, and a missing-credentials / network failure raises from

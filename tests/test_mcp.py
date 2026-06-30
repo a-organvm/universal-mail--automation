@@ -65,6 +65,26 @@ def test_check_protected_sender_delegates():
     assert check_protected_sender("news@deals-promo.example").protected is False
 
 
+def test_check_protected_sender_rejects_header_controls():
+    with pytest.raises(RuntimeError) as ei:
+        check_protected_sender("alerts@example.com\r\nbcc: victim@example.com")
+    assert "invalid input" in str(ei.value)
+
+
+def test_triage_rejects_malformed_provider_before_service(monkeypatch):
+    called = {"run": False}
+
+    def run(**_kwargs):
+        called["run"] = True
+        return _clean_triage_result()
+
+    monkeypatch.setattr(service, "run_triage", run)
+    with pytest.raises(RuntimeError) as ei:
+        triage_preview(provider="../gmail")
+    assert "invalid input" in str(ei.value)
+    assert called["run"] is False
+
+
 def test_triage_audit_violation_is_generic(monkeypatch):
     def boom(**kwargs):
         raise service.AuditInvariantError("msg-7 protected sender leaked id")

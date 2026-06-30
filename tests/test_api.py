@@ -39,6 +39,42 @@ def test_sender_check_not_protected():
     assert r.json()["protected"] is False
 
 
+def test_sender_check_rejects_header_control_characters():
+    r = client.post(
+        "/v1/senders/check",
+        json={"sender": "alerts@example.com\r\nbcc: victim@example.com"},
+    )
+    assert r.status_code == 422
+
+
+def test_triage_rejects_malformed_provider_before_service(monkeypatch):
+    called = {"run": False}
+
+    def _run(**_kwargs):
+        called["run"] = True
+        return _clean_triage_result()
+
+    monkeypatch.setattr(service, "run_triage", _run)
+    r = client.post("/v1/triage/preview", json={"provider": "../gmail"})
+    assert r.status_code == 422
+    assert called["run"] is False
+
+
+def test_triage_rejects_control_characters_in_query_and_label(monkeypatch):
+    called = {"run": False}
+
+    def _run(**_kwargs):
+        called["run"] = True
+        return _clean_triage_result()
+
+    monkeypatch.setattr(service, "run_triage", _run)
+    r = client.post("/v1/triage/preview", json={"query": "label:Inbox\nOR all"})
+    assert r.status_code == 422
+    r = client.post("/v1/triage/preview", json={"remove_label": "Misc/Other\x00"})
+    assert r.status_code == 422
+    assert called["run"] is False
+
+
 class _FakeProvider:
     name = "fake"
 

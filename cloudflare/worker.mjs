@@ -153,6 +153,12 @@ const COMMON_HEADERS = {
   "access-control-allow-methods": "GET,POST,OPTIONS",
   "access-control-allow-headers": "content-type",
 };
+const MAX_JSON_BYTES = 32768;
+const MAX_HEADER_VALUE_LENGTH = 4096;
+const MAX_PROVIDER_LENGTH = 64;
+const MAX_TRIAGE_LIMIT = 50;
+const CONTROL_RE = /[\x00-\x1f\x7f]/;
+const PROVIDER_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 
 function json(body, init = {}) {
   return new Response(JSON.stringify(body), {
@@ -185,6 +191,43 @@ function protectedCategorization(label) {
     is_vip: false,
     vip_note: "",
   };
+}
+
+class InputError extends Error {}
+
+function boundedText(value, field, maxLength, { allowEmpty = true } = {}) {
+  if (typeof value !== "string") throw new InputError(`${field} must be a string`);
+  const text = value.trim();
+  if (!allowEmpty && text.length === 0) throw new InputError(`${field} is required`);
+  if (text.length > maxLength) throw new InputError(`${field} exceeds ${maxLength} characters`);
+  if (CONTROL_RE.test(text)) throw new InputError(`${field} contains control characters`);
+  return text;
+}
+
+function validateSender(value) {
+  return boundedText(value, "sender", MAX_HEADER_VALUE_LENGTH, { allowEmpty: false });
+}
+
+function validateProvider(value, fallback = "demo") {
+  const provider = boundedText(
+    value == null || value === "" ? fallback : String(value),
+    "provider",
+    MAX_PROVIDER_LENGTH,
+    { allowEmpty: false },
+  ).toLowerCase();
+  if (!PROVIDER_RE.test(provider)) {
+    throw new InputError("provider has invalid characters");
+  }
+  return provider;
+}
+
+function validateLimit(value) {
+  if (value == null || value === "") return MAX_TRIAGE_LIMIT;
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_TRIAGE_LIMIT) {
+    throw new InputError(`limit must be between 1 and ${MAX_TRIAGE_LIMIT}`);
+  }
+  return limit;
 }
 
 function senderCheck(sender) {
@@ -403,11 +446,25 @@ function docsPage(base) {
 }
 
 async function readJson(request) {
-  try {
-    return await request.json();
-  } catch {
-    return {};
+  const contentLength = Number(request.headers.get("content-length") || "0");
+  if (contentLength > MAX_JSON_BYTES) {
+    throw new InputError(`JSON body exceeds ${MAX_JSON_BYTES} bytes`);
   }
+  const textBody = await request.text();
+  if (textBody.length > MAX_JSON_BYTES) {
+    throw new InputError(`JSON body exceeds ${MAX_JSON_BYTES} bytes`);
+  }
+  if (!textBody.trim()) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(textBody);
+  } catch {
+    throw new InputError("invalid JSON body");
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new InputError("JSON body must be an object");
+  }
+  return parsed;
 }
 
 async function serveApp(request, env) {
@@ -437,18 +494,33 @@ export default {
     }
 
     if (url.pathname === "/v1/senders/check" && request.method === "POST") {
-      const body = await readJson(request);
-      return json(senderCheck(body.sender));
+      try {
+        const body = await readJson(request);
+        return json(senderCheck(validateSender(body.sender)));
+      } catch (err) {
+        if (err instanceof InputError) return json({ detail: err.message }, { status: 400 });
+        throw err;
+      }
     }
 
     if (url.pathname === "/v1/triage/preview" && request.method === "POST") {
-      const body = await readJson(request);
-      return json(triagePreview(body.provider || "demo", Number(body.limit)));
+      try {
+        const body = await readJson(request);
+        return json(triagePreview(validateProvider(body.provider), validateLimit(body.limit)));
+      } catch (err) {
+        if (err instanceof InputError) return json({ detail: err.message }, { status: 400 });
+        throw err;
+      }
     }
 
     if (url.pathname === "/v1/triage" && request.method === "POST") {
-      const body = await readJson(request);
-      return json(triagePreview(body.provider || "demo", Number(body.limit)));
+      try {
+        const body = await readJson(request);
+        return json(triagePreview(validateProvider(body.provider), validateLimit(body.limit)));
+      } catch (err) {
+        if (err instanceof InputError) return json({ detail: err.message }, { status: 400 });
+        throw err;
+      }
     }
 
     if (url.pathname === "/v1/billing/plans" && request.method === "GET") {
@@ -555,4 +627,4 @@ export default {
 
 // Named exports for unit testing the protected-sender gate. The Cloudflare
 // Worker runtime only consumes the default export above; these are inert there.
-export { senderCheck, senderDomains, isProtectedDomain, domainMatches, govProtected };
+export { senderCheck, senderDomains, isProtectedDomain, domainMatches, govProtected, readJson };

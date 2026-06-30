@@ -49,6 +49,20 @@ from typing import Callable, Deque, Dict, Optional
 
 from api import metering, plans, service
 from api.schemas import MAX_TRIAGE_LIMIT
+from core.input_validation import (
+    InputValidationError,
+    MAX_LABEL_LENGTH,
+    MAX_PLAN_ID_LENGTH,
+    MAX_PROVIDER_LENGTH,
+    MAX_QUERY_LENGTH,
+    MAX_TOKEN_LENGTH,
+    validate_api_token,
+    validate_mail_label,
+    validate_plan_id,
+    validate_provider_name,
+    validate_search_query,
+    validate_triage_limit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +97,12 @@ class TokenRequired(SaaSError):
     """Raised when a request arrives without a usable token."""
 
     status_code = 401
+
+
+class InvalidInput(SaaSError):
+    """Raised when a request argument fails shape validation."""
+
+    status_code = 400
 
 
 # --- rate limiting -----------------------------------------------------------
@@ -244,9 +264,18 @@ def run_saas_triage(
     :class:`api.service.ProviderUnavailable` (503), or
     :class:`api.service.AuditInvariantError` (the fail-closed safety gate).
     """
-    token = (token or "").strip()
-    if not token:
+    try:
+        token = validate_api_token(token)
+    except InputValidationError:
         raise TokenRequired("a non-empty API token is required")
+    try:
+        provider = validate_provider_name(provider)
+        query = validate_search_query(query)
+        license_id = validate_plan_id(license_id)
+        limit = validate_triage_limit(limit)
+        remove_label = validate_mail_label(remove_label)
+    except InputValidationError as e:
+        raise InvalidInput(str(e)) from e
 
     # Resolve the declared license to a known plan (fail-safe: unknown -> Free).
     tier = plans.plan_for(license_id).id
@@ -328,14 +357,14 @@ if _FASTAPI_AVAILABLE:
         # The four-tuple from the task: (token, provider, query, license). The
         # token may instead be supplied via the Authorization header; the body
         # field wins when both are present.
-        token: str = Field(default="", max_length=512)
-        provider: str = Field(default="gmail", max_length=64)
-        query: str = Field(default="has:nouserlabels", max_length=2048)
-        license: str = Field(default="free", max_length=64)
+        token: str = Field(default="", max_length=MAX_TOKEN_LENGTH)
+        provider: str = Field(default="gmail", max_length=MAX_PROVIDER_LENGTH)
+        query: str = Field(default="has:nouserlabels", max_length=MAX_QUERY_LENGTH)
+        license: str = Field(default="free", max_length=MAX_PLAN_ID_LENGTH)
         # Operational knobs, bounded like the rest of the API.
         limit: int = Field(default=100, ge=1, le=MAX_TRIAGE_LIMIT)
         dry_run: bool = True
-        remove_label: Optional[str] = Field(default=None, max_length=512)
+        remove_label: Optional[str] = Field(default=None, max_length=MAX_LABEL_LENGTH)
         tier_routing: bool = False
         vip_only: bool = False
 
@@ -363,6 +392,8 @@ if _FASTAPI_AVAILABLE:
             )
         except TokenRequired as e:
             raise HTTPException(status_code=401, detail=str(e))
+        except InvalidInput as e:
+            raise HTTPException(status_code=400, detail=str(e))
         except RateLimited as e:
             raise HTTPException(
                 status_code=429,

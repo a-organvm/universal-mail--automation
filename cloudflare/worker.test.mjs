@@ -7,7 +7,12 @@
 // and protect the UNION over a multi-address From header.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { senderCheck, isProtectedDomain, govProtected } from "./worker.mjs";
+import worker, {
+  senderCheck,
+  isProtectedDomain,
+  govProtected,
+  readJson,
+} from "./worker.mjs";
 
 const isProtected = (s) => senderCheck(s).protected;
 const held = (s) => senderCheck(s).categorization.tier_config.keep_in_inbox;
@@ -139,6 +144,38 @@ test("ordinary (non-protected) categorization is preserved", () => {
   assert.equal(misc.protected, false);
   assert.equal(misc.categorization.label, "Misc/Other");
   assert.equal(misc.categorization.tier_config.keep_in_inbox, false);
+});
+
+test("route validation rejects malformed sender and provider input", async () => {
+  const badSender = await worker.fetch(
+    new Request("https://example.test/v1/senders/check", {
+      method: "POST",
+      body: JSON.stringify({ sender: "a@example.com\r\nbcc: victim@example.com" }),
+    }),
+    {},
+  );
+  assert.equal(badSender.status, 400);
+
+  const badProvider = await worker.fetch(
+    new Request("https://example.test/v1/triage/preview", {
+      method: "POST",
+      body: JSON.stringify({ provider: "../gmail", limit: 1 }),
+    }),
+    {},
+  );
+  assert.equal(badProvider.status, 400);
+});
+
+test("route validation rejects invalid JSON objects", async () => {
+  await assert.rejects(
+    readJson(
+      new Request("https://example.test/v1/senders/check", {
+        method: "POST",
+        body: "[1,2,3]",
+      }),
+    ),
+    /JSON body must be an object/,
+  );
 });
 
 test("unit: govProtected / isProtectedDomain boundaries", () => {
