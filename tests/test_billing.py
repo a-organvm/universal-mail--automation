@@ -4,7 +4,9 @@ The webhook tests exercise the real signature path (bad signature -> 400) and th
 event-handling logic (via a monkeypatched construct_event) without any live keys.
 """
 
-import stripe
+import pytest
+
+stripe = pytest.importorskip("stripe", reason="stripe dependency is required for billing tests")
 from fastapi.testclient import TestClient
 
 from api import billing
