@@ -669,13 +669,6 @@
   .plan-reveal[open] summary::after { content: "-"; }
   .plan-reveal-body { padding: 11px; display: grid; gap: 10px; }
 
-  .api-key-reveal { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper-2); }
-  .api-key-reveal p { margin: 0 0 8px; font-size: 13px; }
-  .api-key-reveal p:last-child { margin-top: 8px; margin-bottom: 0; }
-  .api-key-row { display: flex; gap: 8px; align-items: center; }
-  .api-key-row input { flex: 1; font-family: monospace; font-size: 13px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: #fff; color: var(--ink); }
-  .btn-sm { padding: 5px 12px; font-size: 13px; white-space: nowrap; }
-
   .agent-grid {
     display: grid;
     grid-template-columns: .92fr 1.08fr;
@@ -1193,13 +1186,6 @@ const SAMPLE_PLANS = [
     monthly_run_cap: 50,
     providers: "gmail",
     blurb: "The full safety floor, free forever. Protected-sender gate plus independent audit receipt, single provider, unlimited dry-runs.",
-    features: [
-      "Fail-closed protected-sender gate (always on)",
-      "Independent, re-derivable audit receipt",
-      "Unlimited dry-run / preview",
-      "Gmail provider",
-      "~50 live triage runs / month (unlimited self-hosted)",
-    ],
   },
   {
     id: "pro",
@@ -1208,13 +1194,6 @@ const SAMPLE_PLANS = [
     monthly_run_cap: 5000,
     providers: "all",
     blurb: "All four providers, scheduled triage, downloadable and 90-day retained signed receipts.",
-    features: [
-      "Everything in Free",
-      "All providers: Gmail, IMAP/iCloud, Outlook, Mail.app",
-      "5,000 live triage runs / month",
-      "Downloadable signed receipts + 90-day hosted ledger",
-      "Scheduled / recurring triage + webhooks",
-    ],
   },
   {
     id: "business",
@@ -1223,14 +1202,6 @@ const SAMPLE_PLANS = [
     monthly_run_cap: null,
     providers: "all",
     blurb: "Unlimited runs, multi-mailbox, retained receipt history for compliance export, plus MCP and agent-commerce access.",
-    features: [
-      "Everything in Pro",
-      "Unlimited triage runs",
-      "Multi-mailbox / team, shared protected-sender policy",
-      "1-year retained signed-receipt history (compliance export)",
-      "MCP server access + ACP agent-commerce surface",
-      "Priority support",
-    ],
   },
 ];
 
@@ -1336,13 +1307,10 @@ async function startCheckout(planId, btn) {
   btn.disabled = true;
   btn.textContent = "Redirecting...";
   const { ok, status, data } = await postJSON("/v1/billing/checkout", { plan: planId, email });
-  if (ok && data && data.url) {
-    if (data.account_api_key) {
-      try { localStorage.setItem("uma-pending-key", data.account_api_key); } catch (e) { /* private mode */ }
-    }
-    window.location.href = data.url;
-    return;
+  if (data && data.account_api_key) {
+    try { localStorage.setItem("uma-api-key", data.account_api_key); } catch (e) {}
   }
+  if (ok && data && data.url) { window.location.href = data.url; return; }
   btn.disabled = false;
   btn.textContent = prev;
   if (status === 503) {
@@ -1368,10 +1336,9 @@ function renderPlans(plans, staticCheckout) {
         <div class="plan-reveal-body">
           <div class="blurb">${escapeHtml(p.blurb || "")}</div>
           <ul>
-            ${(Array.isArray(p.features) && p.features.length
-              ? p.features
-              : [cap, `Providers: ${p.providers || "-"}`, "Gate and receipts"]
-            ).map(f => `<li>${escapeHtml(f)}</li>`).join("")}
+            <li>${escapeHtml(cap)}</li>
+            <li>Providers: ${escapeHtml(p.providers || "-")}</li>
+            <li>Gate and receipts</li>
           </ul>
         </div>
       </details>`;
@@ -1411,15 +1378,15 @@ function renderPlans(plans, staticCheckout) {
   if (!b) return;
   const msg = $("billingMsg");
   if (msg && b === "success") {
-    let keyBlock = "";
+    let keyHtml = "";
     try {
-      const k = localStorage.getItem("uma-pending-key");
+      const k = localStorage.getItem("uma-api-key");
       if (k) {
-        keyBlock = `<div class="api-key-reveal"><p>Your API key — copy it now, it won't be shown again:</p><div class="api-key-row"><input id="apiKeyOut" type="text" readonly value="${escapeHtml(k)}" onclick="this.select()" /><button class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('apiKeyOut').value).then(()=>this.textContent='Copied!').catch(()=>{})">Copy</button></div><p class="meta">Pass it as <code>Authorization: Bearer &lt;key&gt;</code> on <code>POST /v1/triage</code>.</p></div>`;
-        localStorage.removeItem("uma-pending-key");
+        keyHtml = `<br><br><strong>Important:</strong> Save your API key now. It will not be shown again.<br><code style="user-select: all; display: inline-block; margin-top: 6px; padding: 6px 10px; background: #fff; border: 1px solid var(--line-strong); border-radius: var(--radius); font-size: 14px; color: var(--ink);">${escapeHtml(k)}</code>`;
+        localStorage.removeItem("uma-api-key");
       }
-    } catch (e) { /* private mode */ }
-    msg.innerHTML = `<div class="notice ok">Subscription active. Receipt retention is enabled.</div>${keyBlock}`;
+    } catch (e) {}
+    msg.innerHTML = `<div class="notice ok">Subscription active. Receipt retention is enabled.${keyHtml}</div>`;
   }
   if (msg && b === "cancel") msg.innerHTML = `<div class="notice warn">Checkout canceled. No charge made.</div>`;
   document.getElementById("plans-title").scrollIntoView();
