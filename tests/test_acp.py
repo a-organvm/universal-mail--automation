@@ -548,49 +548,6 @@ def test_owner_binding_survives_update_then_blocks_foreign_complete():
     assert foreign.status_code == 403
 
 
-def test_complete_by_a_different_bearer_is_rejected():
-    # The session is bound to its creator's bearer; a DIFFERENT bearer must not be
-    # able to complete it (and thereby be credited the runs) — review U010.
-    payment.set_payment_client(_OKPay())
-    sid = client.post("/acp/checkout_sessions",
-                      json={"items": [{"id": "pack_100"}]},
-                      headers=_headers(auth="Bearer creator-key")).json()["id"]
-    r = client.post(f"/acp/checkout_sessions/{sid}/complete",
-                    json={"payment_data": {"token": "spt_ok"}},
-                    headers=_headers(auth="Bearer attacker-key"))
-    assert r.status_code == 403
-    assert r.json()["code"] == "session_owner_mismatch"
-    # The rejected attempt credited no one.
-    assert get_store().get_account_by_api_key("attacker-key")["run_credits"] == 0
-
-
-def test_complete_credits_the_creator_bearer():
-    payment.set_payment_client(_OKPay())
-    sid = client.post("/acp/checkout_sessions",
-                      json={"items": [{"id": "pack_100"}]},
-                      headers=_headers(auth="Bearer buyer-key")).json()["id"]
-    r = client.post(f"/acp/checkout_sessions/{sid}/complete",
-                    json={"payment_data": {"token": "spt_ok"}},
-                    headers=_headers(auth="Bearer buyer-key"))
-    assert r.status_code == 200 and r.json()["status"] == "completed"
-    assert get_store().get_account_by_api_key("buyer-key")["run_credits"] == 100
-
-
-def test_owner_binding_survives_update_then_blocks_foreign_complete():
-    # The binding must persist through an update (save_session previously could
-    # drop it) and still block a foreign completer afterward.
-    payment.set_payment_client(_OKPay())
-    sid = client.post("/acp/checkout_sessions",
-                      json={"items": [{"id": "pack_100"}]},
-                      headers=_headers(auth="Bearer owner-2")).json()["id"]
-    upd = client.post(f"/acp/checkout_sessions/{sid}",
-                      json={"items": [{"id": "pack_1000"}]},
-                      headers=_headers(auth="Bearer owner-2"))
-    assert upd.status_code == 200
-    foreign = client.post(f"/acp/checkout_sessions/{sid}/complete",
-                          json={"payment_data": {"token": "spt_ok"}},
-                          headers=_headers(auth="Bearer someone-else"))
-    assert foreign.status_code == 403
 
 
 def test_cancel_then_cannot_cancel_completed():
