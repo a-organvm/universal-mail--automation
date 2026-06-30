@@ -1,16 +1,27 @@
 import fs from 'fs/promises';
 import path from 'path';
 
+type LabelCount = Record<string, number>;
+type LabelerStats = {
+  history: LabelCount;
+};
+
 export default async function Dashboard() {
-  let stats: { history?: Record<string, number> } = { history: {} };
-  let error = null;
+  let stats: LabelerStats = { history: {} };
+  let error: string | null = null;
 
   try {
     const statePath = path.join(process.cwd(), '../labeler_state.json');
     const content = await fs.readFile(statePath, 'utf8');
-    stats = JSON.parse(content);
-  } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
+    const parsed = JSON.parse(content) as Partial<LabelerStats>;
+    stats = {
+      history:
+        parsed.history && typeof parsed.history === 'object' && parsed.history !== null
+          ? parsed.history
+          : {},
+    };
+  } catch (err: unknown) {
+    error = err instanceof Error ? err.message : 'Unable to load state.';
   }
 
   // Pre-calculated mapping based on python core/rules.py
@@ -68,7 +79,7 @@ export default async function Dashboard() {
                 <h3 className="text-lg font-semibold text-gray-900">Label Distribution</h3>
               </div>
               <ul className="divide-y divide-gray-200">
-                {Object.entries(stats.history || {}).sort((a, b) => b[1] - a[1]).map(([label, count]) => (
+                {Object.entries(stats.history || {}).sort((a, b) => Number(b[1]) - Number(a[1])).map(([label, count]) => (
                   <li key={label} className="px-6 py-4 flex justify-between items-center hover:bg-gray-50 transition-colors">
                     <span className="font-medium text-gray-700">{label}</span>
                     <span className="text-gray-900 font-semibold bg-gray-100 px-3 py-1 rounded-full text-sm">
