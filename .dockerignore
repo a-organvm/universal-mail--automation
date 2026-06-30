@@ -1,0 +1,37 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node/tooling artifacts
+node_modules/
+web/node_modules/
+dist/
+build/
+
+# Local python/build state
+.venv/
+venv/
+env/
+
+# Logs and generated workflow artifacts
+*.log
+gmail_labeler.log
+labeler_state.json
+audit/
+mail_export.tsv
+mail_report.md
+
+# Database and local stores
+*.db
+*.db-wal
+*.db-shm
+data/
+universal_mail_automation.egg-info/
+
+# Test/coverage outputs
+.coverage
+coverage.xml
+
+# Runtime/platform metadata
+.claude/
+.cache/

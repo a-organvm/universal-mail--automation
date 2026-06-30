@@ -6,7 +6,6 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-$REPO_DIR/.venv}"
-PLIST_SRC="$REPO_DIR/com.user.mail_automation.plist"
 PLIST_DEST="$HOME/Library/LaunchAgents/com.user.mail_automation.plist"
 LOG_DIR="$HOME/System/Logs/mail_automation"
 INSTALL_LAUNCH_AGENT="${INSTALL_LAUNCH_AGENT:-0}"
@@ -38,6 +37,40 @@ chmod +x "$REPO_DIR/run_automation.sh"
 # Create log directory.
 mkdir -p "$LOG_DIR"
 
+build_launch_agent_plist() {
+  mkdir -p "$LOG_DIR"
+  cat > "$PLIST_DEST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.mail_automation</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$REPO_DIR/run_automation.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$REPO_DIR</string>
+    <key>StandardOutPath</key>
+    <string>$LOG_DIR/launchd.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>$LOG_DIR/launchd.stderr.log</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
+EOF
+}
+
 # Quick env reminder.
 if [ ! -f "$HOME/.config/op/mail_automation.env.op.sh" ]; then
   echo "WARNING: Env file not found at ~/.config/op/mail_automation.env.op.sh" >&2
@@ -46,9 +79,9 @@ fi
 # Install and load the launchd job only when explicitly requested. The primary
 # local path is on-demand because this machine's global agent policy forbids
 # LaunchAgents after repeated freeze incidents.
-if [ "$INSTALL_LAUNCH_AGENT" = "1" ] && [ -f "$PLIST_SRC" ]; then
+if [ "$INSTALL_LAUNCH_AGENT" = "1" ]; then
   mkdir -p "$(dirname "$PLIST_DEST")"
-  cp "$PLIST_SRC" "$PLIST_DEST"
+  build_launch_agent_plist
 
   AGENT_ID="gui/$(id -u)"
   LABEL="com.user.mail_automation"
@@ -64,8 +97,6 @@ if [ "$INSTALL_LAUNCH_AGENT" = "1" ] && [ -f "$PLIST_SRC" ]; then
 
   echo "LaunchAgent installed: $PLIST_DEST"
   echo "Scheduled to run daily at 9:00 AM"
-elif [ "$INSTALL_LAUNCH_AGENT" = "1" ]; then
-  echo "Launchd plist not found at $PLIST_SRC; skipping scheduler setup." >&2
 else
   echo "LaunchAgent install skipped. Use scripts/intake_now.sh for on-demand intake."
   echo "To opt into launchd on a machine where it is allowed: INSTALL_LAUNCH_AGENT=1 ./deploy.sh"

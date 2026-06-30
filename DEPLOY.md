@@ -35,6 +35,15 @@ Socket binding and Docker smoke tests were not runnable in this sandbox:
 `operation not permitted`; `docker` is not installed here. The CI deploy workflow
 builds and smoke-tests the same Dockerfile.
 
+## Remaining before production hardening
+
+- Set host/runtime secrets in your deployment target: provider credentials and
+  the billing/receipt envs (`STRIPE_SECRET_KEY`, `STRIPE_PRICE_*`,
+  `STRIPE_WEBHOOK_SECRET`, `RECEIPT_SIGNING_KEY`).
+- Set `MCP_ALLOWED_HOSTS` to the deployed hostname before enabling `/mcp`.
+- For Cloudflare share deployments, refresh `web` assets before deploy and
+  treat the worker as a review/demo surface, not the canonical backend.
+
 ## Deploy commands
 
 Container host:

@@ -477,13 +477,24 @@ class Store:
                 "SELECT * FROM idempotency_keys WHERE key = ?", (key,)
             )
             if existing is None:
-                self._conn.execute(
-                    "INSERT INTO idempotency_keys (key, scope, request_hash, "
-                    "status, created_at) VALUES (?,?,?,?,?)",
-                    (key, scope, request_hash, "processing", _now()),
-                )
-                self._conn.commit()
-                return {"state": "new"}
+                # Multi-process hosts can race on INSERT for the same key.
+                # Retry by re-reading the row instead of failing the request
+                # with a unique-constraint error.
+                try:
+                    self._conn.execute(
+                        "INSERT INTO idempotency_keys (key, scope, request_hash, "
+                        "status, created_at) VALUES (?,?,?,?,?)",
+                        (key, scope, request_hash, "processing", _now()),
+                    )
+                    self._conn.commit()
+                    return {"state": "new"}
+                except sqlite3.IntegrityError:
+                    self._conn.rollback()
+                    existing = self._fetch_one_nolock(
+                        "SELECT * FROM idempotency_keys WHERE key = ?", (key,)
+                    )
+                    if existing is None:
+                        raise
             if existing["status"] == "processing":
                 # Stale (crashed) claim -> let this request re-claim it, rebinding
                 # to the current payload. Prevents a permanent 409 lockout.
