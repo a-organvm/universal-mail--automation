@@ -13,27 +13,15 @@ surface, not the canonical product backend.
 
 ## Verified locally
 
-These checks passed on 2026-06-30:
+Smoke checks are covered in this repository by `ci.yml` + `deploy.yml`:
 
-```bash
-python3 -m pytest -q                               # 517 passed
-python3 -m ruff check --select E9,F63,F7,F82 .    # clean
-python3 -m build --no-isolation --skip-dependency-check
-python3 -m twine check dist/*
-umail --version                                    # umail 0.2.0
-npm run lint --prefix web -- --max-warnings=0
-npm run build --prefix web
-node --test cloudflare/worker.test.mjs
-```
+- Python 3.11/3.12 test matrix
+- Python package build + `twine check`
+- `umail --version` from built wheel
+- Web lint/build and Cloudflare Worker tests
 
-FastAPI was also smoke-tested in process with `TestClient` for `/health`,
-`/v1/billing/plans`, `/v1/senders/check`, `/app/`, and
-`/.well-known/agent.json`.
-
-Socket binding and Docker smoke tests were not runnable in this sandbox:
-`uvicorn` startup reached application startup, then local port binding returned
-`operation not permitted`; `docker` is not installed here. The CI deploy workflow
-builds and smoke-tests the same Dockerfile.
+A production host or container host is required to fully prove the socket binding
+path (`/health`, `/v1/billing/plans`, `/v1/senders/check`, `/app`).
 
 ## Deploy commands
 
@@ -60,21 +48,10 @@ CLOUDFLARE_API_TOKEN=... npx wrangler@4 deploy
 
 ## What remains
 
-1. ✅ **PR/CI gate** — all open PRs merged or closed (2026-06-30). CI on `main`
-   is fully green: Python 3.11, 3.12, package build (wheel smoke-test including
-   `umail --version`), web lint/build, Cloudflare Worker tests. No open PRs block deploy.
-2. **Production host gate** — choose the live host and set its base env. A
-   no-credential demo only needs the app deployed; set `MCP_ALLOWED_HOSTS` to
-   the public hostname if `/mcp` is exposed.
-3. **Live mailbox gate** — set provider credentials:
-   `GMAIL_OAUTH_OP_REF`/`GMAIL_TOKEN_OP_REF`, or `IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`,
-   or `OUTLOOK_CLIENT_ID`/`OUTLOOK_TOKEN_CACHE`.
-4. **Money gate** — set `STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`,
-   `STRIPE_PRICE_BUSINESS`, and `STRIPE_WEBHOOK_SECRET`; configure Stripe to
-   deliver `checkout.session.completed`, `customer.subscription.*`,
-   `invoice.paid`, and `invoice.payment_failed` to
-   `https://<host>/v1/billing/webhook`.
-5. **Cloudflare demo gate** — set `CLOUDFLARE_API_TOKEN` in CI or the local
-   deploy environment before claiming `https://uma.4444j99.dev` is current.
+1. **PR gate (external):** confirm all open PRs are merged/closed and the latest `main` CI run is green in GitHub.
+2. **Production host gate (external):** pick the live hostname, set `MCP_ALLOWED_HOSTS` if `/mcp` is public, and confirm traffic to `/health`, `/app`, and `/v1` in production.
+3. **Mailbox credentials gate:** set one provider auth chain on the host (`GMAIL_*`, `IMAP_*`, or `OUTLOOK_*`).
+4. **Billing gate:** set `STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_BUSINESS`, and `STRIPE_WEBHOOK_SECRET`; wire `checkout.session.completed`, `customer.subscription.*`, `invoice.paid`, and `invoice.payment_failed` to `/v1/billing/webhook`.
+5. **Cloudflare demo gate:** set `CLOUDFLARE_API_TOKEN` before rotating or claiming `https://uma.4444j99.dev` as current.
 
-No code or PR blockers remain. Items 2–5 are credentials and infra decisions only.
+No remaining known code-level blockers in this workspace snapshot.
