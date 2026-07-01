@@ -21,6 +21,7 @@ mapping for the webhook is derived from the environment at runtime.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -172,7 +173,15 @@ def plan_id_for_price(price_id: Optional[str]) -> Optional[str]:
     return None
 
 
-def entitlements_for(account: Optional[dict]) -> dict:
+def _int_field(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int | float | str):
+        return int(value)
+    return default
+
+
+def entitlements_for(account: Mapping[str, object] | None) -> dict:
     """Resolve the effective limits for an account (or the Free floor if None).
 
     A non-active subscription (past_due / canceled / unpaid) is downgraded to the
@@ -180,14 +189,21 @@ def entitlements_for(account: Optional[dict]) -> dict:
     gate stays fully on regardless."""
     if not account:
         plan = PLANS[DEFAULT_PLAN_ID]
+        run_credits = 0
     else:
-        status = (account.get("status") or "active").lower()
+        status = str(account.get("status") or "active").lower()
         active = status in ("active", "trialing")
-        plan = plan_for(account.get("plan")) if active else PLANS[DEFAULT_PLAN_ID]
+        plan_id = account.get("plan")
+        plan = (
+            plan_for(str(plan_id) if plan_id is not None else None)
+            if active
+            else PLANS[DEFAULT_PLAN_ID]
+        )
+        run_credits = _int_field(account.get("run_credits", 0))
     return {
         "plan": plan.id,
         "monthly_run_cap": plan.monthly_run_cap,
         "providers": plan.providers,
         "retained_receipt_days": plan.retained_receipt_days,
-        "run_credits": int(account.get("run_credits", 0)) if account else 0,
+        "run_credits": run_credits,
     }

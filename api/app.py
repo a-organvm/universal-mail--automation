@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
 
@@ -36,6 +35,7 @@ from api import (
     well_known,
 )
 from api.auth import require_authorized_account
+from api.store import AccountRow
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ def triage(req: schemas.TriageRequest, request: Request) -> dict:
 
 
 def _run(
-    req: schemas.TriageRequest, *, dry_run: bool, account: Optional[dict] = None
+    req: schemas.TriageRequest, *, dry_run: bool, account: AccountRow | None = None
 ) -> dict:
     try:
         return triage_runtime.run_triage_with_receipt(

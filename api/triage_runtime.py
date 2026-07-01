@@ -6,6 +6,7 @@ import secrets
 from typing import Optional
 
 from api import metering, receipts, service
+from api.store import AccountRow
 
 
 class AccountRequired(RuntimeError):
@@ -21,7 +22,7 @@ def run_triage_with_receipt(
     remove_label: Optional[str],
     tier_routing: bool,
     vip_only: bool,
-    account: Optional[dict] = None,
+    account: AccountRow | None = None,
 ) -> dict:
     """Run triage through the safety gate, metering live mutations when needed."""
     if not dry_run and account is None:

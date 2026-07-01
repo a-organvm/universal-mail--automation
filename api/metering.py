@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from api import plans
-from api.store import get_store
+from api.store import AccountRow, get_store
 
 
 class EntitlementExhausted(RuntimeError):
@@ -50,7 +50,9 @@ def provider_allowed(entitlements: dict, provider: str) -> bool:
     return (provider or "gmail").lower() in {"gmail", "fake"}
 
 
-def reserve_live_run(account: dict, *, provider: str = "gmail") -> LiveRunReservation:
+def reserve_live_run(
+    account: AccountRow, *, provider: str = "gmail"
+) -> LiveRunReservation:
     """Reserve entitlement before a live mailbox mutation.
 
     Monthly plan allowance is used first. If the monthly cap is exhausted, a
