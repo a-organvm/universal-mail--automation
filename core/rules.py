@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parseaddr
-from typing import Dict, List, Any, Optional, Tuple, Iterator, TypedDict
+from typing import Dict, List, Optional, Tuple, Iterator, TypedDict, Set
 
 class LabelRuleDef(TypedDict, total=False):
     patterns: List[str]
@@ -602,7 +602,7 @@ GMAIL_DOMAINS = {"gmail.com", "googlemail.com"}
 EXAMPLE_SELF_LOCALPARTS = {"youremail"}
 
 
-def _load_local_protected() -> Tuple[List[str], set]:
+def _load_local_protected() -> Tuple[List[str], Set[str]]:
     """Load the user's REAL protected domains + self mailboxes from a gitignored
     local config so PII never enters this PUBLIC repo.
 
@@ -617,7 +617,7 @@ def _load_local_protected() -> Tuple[List[str], set]:
         "config", "protected_senders.local.txt",
     )
     domains: List[str] = []
-    selfs: set = set()
+    selfs: Set[str] = set()
     try:
         # errors="replace": a non-UTF-8 byte must NOT raise UnicodeDecodeError and
         # crash the import (disabling the whole gate). Bad bytes degrade to U+FFFD
@@ -703,7 +703,7 @@ def _is_protected_domain(domain: str) -> bool:
     return any(_domain_matches(domain, e) for e in PROTECTED_SENDERS)
 
 
-def _relay_domain_candidates(local: str) -> set:
+def _relay_domain_candidates(local: str) -> Set[str]:
     """Recover candidate real domains from an iCloud relay local-part.
 
     iCloud Hide My Email / forwarding rewrites the real sender into the local
@@ -725,7 +725,7 @@ def _relay_domain_candidates(local: str) -> set:
     return cands
 
 
-def _best_relay_domain(cands: set) -> str:
+def _best_relay_domain(cands: Set[str]) -> str:
     """Pick the most-likely REAL domain from relay candidates for categorization.
     Prefer a candidate whose terminal label looks like a TLD (all-alpha) and the
     fewest labels (the token-appended variant carries a junk last label)."""

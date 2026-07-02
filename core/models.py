@@ -6,7 +6,7 @@ Provides provider-agnostic data structures for email messages and label actions.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List, Set
+from typing import Optional, List, Set, Dict
 from enum import Enum
 
 
@@ -133,7 +133,7 @@ class ProcessingResult:
     processed_count: int = 0
     success_count: int = 0
     error_count: int = 0
-    label_counts: dict = field(default_factory=dict)
+    label_counts: Dict[str, int] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
 
     def add_label_stat(self, label: str) -> None:
